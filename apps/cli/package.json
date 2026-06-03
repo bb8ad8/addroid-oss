@@ -46,7 +46,7 @@
     "package:smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
-    "@prisma/client": "^5.18.0",
+    "@prisma/client": "^7.8.0",
     "cron-parser": "^4.9.0",
     "pg-boss": "^10.1.5",
     "sharp": "^0.34.5",
