@@ -62,7 +62,7 @@
     "@addroid/meta-adapter": "*",
     "@addroid/ops-template": "*",
     "@addroid/queue": "*",
-    "esbuild": "^0.27.7",
+    "esbuild": "^0.28.0",
     "tsx": "^4.16.5",
     "typescript": "^5.5.4"
   }
