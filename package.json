@@ -50,7 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
-    "eslint": "^9.39.4",
+    "eslint": "^10.4.1",
     "postcss": "8.5.14",
     "prisma": "^5.18.0",
     "tsx": "^4.16.5",
