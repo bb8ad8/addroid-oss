@@ -64,6 +64,6 @@
     "@addroid/queue": "*",
     "esbuild": "^0.27.7",
     "tsx": "^4.16.5",
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   }
 }

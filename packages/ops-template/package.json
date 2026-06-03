@@ -13,6 +13,6 @@
     "test": "node --import tsx --test \"src/__tests__/**/*.test.ts\""
   },
   "devDependencies": {
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   }
 }
