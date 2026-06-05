@@ -29,24 +29,34 @@ import * as readlineControl from "node:readline";
 import readline from "node:readline/promises";
 import {
   buildSlackInstallationMetadata,
+  buildDiscordInstallationMetadata,
   CryptoNotConfiguredError,
   defaultAddroidConfig,
   getCryptoBoundary,
+  getDiscordChannel,
   readAddroidConfig,
   readLocalSecrets,
   resolveWebBinding,
   postSlackMessage,
+  postDiscordMessage,
   redactSecretTail,
   SLACK_BOT_SCOPES,
   SlackApiError,
   SlackTokenValidationError,
+  DiscordApiError,
+  DiscordTokenValidationError,
   validateSlackInputs,
+  validateDiscordInputs,
   verifyBotToken,
+  verifyDiscordBotToken,
   verifySocketModeConnection,
   type SlackAuthInputs,
   type SlackAuthTestResponse,
   type SlackFetch,
   type SocketModeChannelOpener,
+  type DiscordAuthInputs,
+  type DiscordApplicationResponse,
+  type DiscordFetch,
 } from "@addroid/config";
 import {
   buildAppAccessToken,
@@ -112,6 +122,17 @@ interface ParsedSlackArgs {
   asJson: boolean;
 }
 
+interface ParsedDiscordArgs {
+  kind: "discord";
+  inputs: Partial<DiscordAuthInputs>;
+  asJson: boolean;
+  /** 接続時に対象チャンネルへテストメッセージを送るか (既定 true)。 */
+  sendTest: boolean;
+}
+
+const DISCORD_TEST_MESSAGE_TEXT =
+  "AdDroid 接続テスト — Discord Gateway 連携が設定されました。本メッセージは `addroid connect discord` から送信されています。";
+
 interface ParsedMetaArgs {
   kind: "meta";
   mode: "token" | "oauth";
@@ -162,6 +183,7 @@ type GithubGhRunner = (
 
 type ParsedAction =
   | ParsedSlackArgs
+  | ParsedDiscordArgs
   | ParsedMetaArgs
   | ParsedLlmArgs
   | ParsedGithubArgs
@@ -204,6 +226,8 @@ export interface SlackAuthRunOptions {
   githubGhRunner?: GithubGhRunner;
   /** LLM provider 選択 UI の注入 (テスト用)。 */
   llmSelectProvider?: () => Promise<LlmAuthSelection | null>;
+  /** Discord REST API 用 fetch 注入。テストでモックする。 */
+  discordFetch?: DiscordFetch;
 }
 
 export async function runAuthCommand(
@@ -228,6 +252,9 @@ export async function runAuthCommand(
   }
   if (parsed.kind === "github") {
     return await runAuthGithub(parsed, opts);
+  }
+  if (parsed.kind === "discord") {
+    return await runAuthDiscord(parsed, opts);
   }
   return await runAuthSlack(parsed, opts);
 }
@@ -480,11 +507,67 @@ function parseArgs(args: string[]): ParsedAction {
     };
   }
 
+  if (provider === "discord") {
+    const env = process.env;
+    const inputs: Partial<DiscordAuthInputs> = {};
+    if (env.DISCORD_BOT_TOKEN) inputs.botToken = env.DISCORD_BOT_TOKEN;
+    if (env.DISCORD_GUILD_ID) inputs.guildId = env.DISCORD_GUILD_ID;
+    if (env.DISCORD_CHANNEL_ID) inputs.channelId = env.DISCORD_CHANNEL_ID;
+    let asJson = false;
+    let sendTest = true;
+    for (let i = 0; i < rest.length; i += 1) {
+      const a = rest[i]!;
+      if (a === "--help" || a === "-h") {
+        return { kind: "help" };
+      } else if (a === "--json") {
+        asJson = true;
+      } else if (a === "--no-test") {
+        sendTest = false;
+      } else if (a.startsWith("--bot-token=")) {
+        inputs.botToken = a.slice("--bot-token=".length);
+      } else if (a === "--bot-token" || a === "--token") {
+        const next = rest[i + 1];
+        if (!next) return optionMissing("auth discord", a);
+        inputs.botToken = next;
+        i += 1;
+      } else if (a.startsWith("--guild=")) {
+        inputs.guildId = a.slice("--guild=".length);
+      } else if (a === "--guild") {
+        const next = rest[i + 1];
+        if (!next) return optionMissing("auth discord", a);
+        inputs.guildId = next;
+        i += 1;
+      } else if (a.startsWith("--channel=")) {
+        inputs.channelId = a.slice("--channel=".length);
+      } else if (a === "--channel") {
+        const next = rest[i + 1];
+        if (!next) return optionMissing("auth discord", a);
+        inputs.channelId = next;
+        i += 1;
+      } else if (a.startsWith("--")) {
+        return {
+          kind: "error",
+          code: 2,
+          stderr: `[addroid auth discord] 未知のオプション: ${a}\n`,
+          stdoutHelp: true,
+        };
+      } else {
+        return {
+          kind: "error",
+          code: 2,
+          stderr: `[addroid auth discord] 余分な引数: ${a}\n`,
+          stdoutHelp: true,
+        };
+      }
+    }
+    return { kind: "discord", inputs, asJson, sendTest };
+  }
+
   if (provider !== "slack") {
     return {
       kind: "error",
       code: 2,
-      stderr: `[addroid auth] 未対応のプロバイダ: ${provider}\n  対応プロバイダ: meta, github, slack, llm\n`,
+      stderr: `[addroid auth] 未対応のプロバイダ: ${provider}\n  対応プロバイダ: meta, github, slack, discord, llm\n`,
       stdoutHelp: true,
     };
   }
@@ -2224,6 +2307,240 @@ function reportSlackError(
   return 1;
 }
 
+async function runAuthDiscord(
+  parsed: ParsedDiscordArgs,
+  opts: SlackAuthRunOptions
+): Promise<number> {
+  // 1) 形式バリデーション (DB / Discord 通信前)。
+  let normalized: DiscordAuthInputs;
+  try {
+    normalized = validateDiscordInputs(parsed.inputs);
+  } catch (err) {
+    if (err instanceof DiscordTokenValidationError) {
+      process.stderr.write(`[addroid auth discord] ${err.message}\n`);
+      process.stderr.write(
+        "  --bot-token / --guild / --channel か、DISCORD_BOT_TOKEN / DISCORD_GUILD_ID / DISCORD_CHANNEL_ID 環境変数で渡してください。\n"
+      );
+      return 2;
+    }
+    throw err;
+  }
+
+  // 2) ENCRYPTION_KEY 検証 (Discord 通信前に fail-fast)。
+  let crypto: ReturnType<typeof getCryptoBoundary>;
+  try {
+    crypto = getCryptoBoundary();
+  } catch (err) {
+    if (err instanceof CryptoNotConfiguredError) {
+      process.stderr.write(
+        `[addroid auth discord] ENCRYPTION_KEY が利用できません: ${err.message}\n`
+      );
+      return 2;
+    }
+    throw err;
+  }
+
+  // 3) DATABASE_URL 検証。
+  if (!process.env.DATABASE_URL) {
+    process.stderr.write(
+      "[addroid auth discord] DATABASE_URL が設定されていません。`.env.local` を作成し再実行してください。\n"
+    );
+    return 2;
+  }
+
+  // 4) Discord REST: GET /applications/@me → GET /channels/{id} → (任意) test message。
+  const fetchImpl = opts.discordFetch;
+  const now = opts.now ?? (() => new Date());
+  const lines: string[] = ["[addroid connect discord]", ""];
+
+  let application: DiscordApplicationResponse;
+  try {
+    application = await verifyDiscordBotToken(normalized.botToken, fetchImpl);
+  } catch (err) {
+    return reportDiscordError("applications/@me", err, parsed.asJson);
+  }
+  lines.push(`  application   : ${application.name} (${application.applicationId})`);
+  lines.push(`  bot user      : ${application.botUsername} (${application.botUserId})`);
+  lines.push(`  bot token     : ${redactSecretTail(normalized.botToken)}`);
+
+  let channelName: string | null = null;
+  try {
+    const channel = await getDiscordChannel(
+      normalized.botToken,
+      normalized.channelId,
+      fetchImpl
+    );
+    channelName = channel.name;
+    if (channel.guildId && channel.guildId !== normalized.guildId) {
+      process.stderr.write(
+        `[addroid auth discord] 指定 channel は guild ${channel.guildId} に属します (--guild ${normalized.guildId} と不一致)。\n`
+      );
+      return 2;
+    }
+    lines.push(
+      `  channel       : ${channel.name ? `#${channel.name}` : normalized.channelId} (${normalized.channelId})`
+    );
+  } catch (err) {
+    return reportDiscordError("channels", err, parsed.asJson);
+  }
+
+  let testMessageOkAt: Date | null = null;
+  if (parsed.sendTest) {
+    try {
+      await postDiscordMessage(
+        normalized.botToken,
+        normalized.channelId,
+        DISCORD_TEST_MESSAGE_TEXT,
+        fetchImpl ? { fetchImpl } : {}
+      );
+      testMessageOkAt = now();
+      lines.push(`  test message  : sent to ${normalized.channelId}`);
+    } catch (err) {
+      return reportDiscordError("channels.messages", err, parsed.asJson);
+    }
+  }
+
+  // 5) 永続化。
+  const verifiedAt = now();
+  const metadata = buildDiscordInstallationMetadata({
+    application,
+    guildId: normalized.guildId,
+    channelId: normalized.channelId,
+    channelName,
+    verifiedAt,
+    testMessageOkAt,
+  });
+  const accessTokenCiphertext = crypto.encrypt(normalized.botToken);
+
+  const { prisma } = (opts.prismaOverride
+    ? { prisma: opts.prismaOverride as { oAuthToken: { upsert: Function }; $disconnect: () => Promise<void> } }
+    : await import("@addroid/db")) as {
+    prisma: {
+      oAuthToken: { upsert: (args: unknown) => Promise<unknown> };
+      $disconnect: () => Promise<void>;
+    };
+  };
+
+  try {
+    await prisma.oAuthToken.upsert({
+      where: {
+        provider_accountIdentifier: {
+          provider: "discord",
+          accountIdentifier: normalized.guildId,
+        },
+      },
+      update: {
+        scopes: ["bot", "applications.commands"],
+        accessTokenCiphertext,
+        refreshTokenCiphertext: null,
+        connectedAt: verifiedAt,
+        metadata,
+      },
+      create: {
+        provider: "discord",
+        accountIdentifier: normalized.guildId,
+        scopes: ["bot", "applications.commands"],
+        accessTokenCiphertext,
+        refreshTokenCiphertext: null,
+        connectedAt: verifiedAt,
+        metadata,
+      },
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[addroid connect discord] DB への保存に失敗しました: ${(err as Error).message}\n`
+    );
+    if (parsed.asJson) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, stage: "persist", error: (err as Error).message }, null, 2)}\n`
+      );
+    }
+    return 1;
+  } finally {
+    if (!opts.prismaOverride) {
+      await (prisma as { $disconnect: () => Promise<void> }).$disconnect().catch(() => undefined);
+    }
+  }
+
+  lines.push(`  persisted     : oauth_tokens (provider=discord, guild_id=${normalized.guildId})`);
+  lines.push("");
+  lines.push(
+    "  Discord 連携が有効になりました。worker 再起動後、対象チャンネルで /adops コマンドやメンションが使えます。"
+  );
+  lines.push("  (MessageContent は特権インテントです。Developer Portal > Bot で有効化してください。)");
+  lines.push("");
+
+  if (parsed.asJson) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: true,
+          provider: "discord",
+          applicationId: application.applicationId,
+          botUserId: application.botUserId,
+          botUsername: application.botUsername,
+          guildId: normalized.guildId,
+          channelId: normalized.channelId,
+          ...(channelName ? { channelName } : {}),
+          verifiedAt: verifiedAt.toISOString(),
+          testMessageSent: testMessageOkAt !== null,
+        },
+        null,
+        2
+      )}\n`
+    );
+  } else {
+    process.stdout.write(lines.join("\n"));
+  }
+  return 0;
+}
+
+function reportDiscordError(endpoint: string, err: unknown, asJson: boolean): number {
+  if (err instanceof DiscordApiError) {
+    process.stderr.write(
+      `[addroid connect discord] Discord ${endpoint} に失敗しました: ${err.message}\n`
+    );
+    if (asJson) {
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            ok: false,
+            stage: endpoint,
+            discordCode: err.discordCode,
+            httpStatus: err.status,
+            message: err.message,
+          },
+          null,
+          2
+        )}\n`
+      );
+    }
+    if (err.status === 401) {
+      process.stderr.write(
+        "  bot トークンが無効です。Developer Portal > Bot > Reset Token で再生成してください。\n"
+      );
+    } else if (err.discordCode === 50001 || err.status === 403) {
+      process.stderr.write(
+        "  bot が対象チャンネル/サーバーにアクセスできません。bot を招待し、チャンネル閲覧・送信権限を付与してください。\n"
+      );
+    } else if (err.status === 404) {
+      process.stderr.write(
+        "  channel が見つかりません。channel ID (snowflake) を確認してください。\n"
+      );
+    }
+    return 1;
+  }
+  process.stderr.write(
+    `[addroid connect discord] Discord ${endpoint} で予期しないエラー: ${(err as Error).message}\n`
+  );
+  if (asJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, stage: endpoint, message: (err as Error).message }, null, 2)}\n`
+    );
+  }
+  return 1;
+}
+
 function printHelp() {
   process.stdout.write(
     [
@@ -2234,6 +2551,7 @@ function printHelp() {
       "  addroid auth meta --oauth [--no-open] [--no-select-default] [--timeout-ms <ms>] [--json]",
       "  addroid auth github [--client-id <id>] [--no-open] [--no-bootstrap] [--timeout-ms <ms>] [--json]",
       "  addroid auth slack [--xoxb <token>] [--xapp <token>] [--channel <id>] [--json]",
+      "  addroid auth discord [--bot-token <token>] [--guild <id>] [--channel <id>] [--no-test] [--json]",
       "  addroid auth llm",
       "  addroid auth llm --provider <openai|anthropic> [--api-key <key>] [--model <model>] [--base-url <url>] [--json]",
       "  addroid auth llm --provider codex [--no-open] [--timeout-ms <ms>] [--json]",
@@ -2250,7 +2568,10 @@ function printHelp() {
       "  --timeout-ms <ms>  OAuth callback / device flow 待機時間 (既定 180000)",
       "  --xoxb <token>     Slack Bot User OAuth Token (xoxb-*)",
       "  --xapp <token>     Slack App-Level Token (xapp-*, Socket Mode 用)",
-      "  --channel <id>     通知先チャンネル ID (Cxxxx / Gxxxx / Dxxxx)",
+      "  --channel <id>     通知先チャンネル ID (Slack: Cxxxx/Gxxxx/Dxxxx、Discord: snowflake)",
+      "  --bot-token <token> Discord bot トークン (Developer Portal > Bot)",
+      "  --guild <id>       Discord サーバー (guild) ID (snowflake)",
+      "  --no-test          Discord 接続時のテストメッセージ送信をスキップ",
       "  --provider <name>  LLM provider (openai / anthropic / codex)",
       "  --api-key <key>    LLM API key。未指定時は OPENAI_API_KEY / ANTHROPIC_API_KEY または非表示入力",
       "  --model <model>    LLM 既定 model",
@@ -2261,6 +2582,7 @@ function printHelp() {
       "",
       "Environment fallbacks (フラグ未指定時に参照):",
       "  SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_NOTIFICATION_CHANNEL_ID",
+      "  DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DISCORD_CHANNEL_ID",
       "  ADDROID_GITHUB_CLIENT_ID, ADDROID_GITHUB_OAUTH_CLIENT_ID",
       "  OPENAI_API_KEY, ANTHROPIC_API_KEY, ADDROID_LLM_PROVIDER",
       "",
@@ -2274,6 +2596,8 @@ function printHelp() {
       "  - `addroid auth llm` は Codex app-server / OpenAI API key / Claude (Anthropic) API key の選択から開始します。",
       "  - Codex は `addroid auth llm --provider codex` で local app-server を起動し、Codex CLI / ChatGPT の認証状態を確認します。",
       "  - Slack 連携は完全に任意です。本コマンドを実行しない限り AdDroid は Slack 通信を行いません。",
+      "  - Discord 連携も完全に任意です。Gateway WebSocket (アウトバウンド常時接続) のみで、public webhook は登録しません。",
+      "  - Discord bot には MessageContent 特権インテントが必要です (Developer Portal > Bot で有効化)。",
       "  - Socket Mode 専用。public な webhook URL や request URL は登録しません。",
       "  - 平文トークンは ENCRYPTION_KEY (AES-256-GCM) で暗号化し oauth_tokens に保存します。",
       "  - OpenAI / Anthropic API key は暗号化境界で保存されます。.env への恒久保存は不要です。",

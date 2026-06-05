@@ -10,6 +10,7 @@ import { resolveAddroidPaths } from "@addroid/config";
 import {
   checkConfigFile,
   checkDatabaseUrl,
+  checkDiscord,
   checkEncryptionKey,
   checkGithubCli,
   checkPlatform,
@@ -31,6 +32,7 @@ export async function runDoctor(_args: string[]): Promise<number> {
   checks.push(await checkConfigFile(paths));
   checks.push(await checkSecretsLocal(paths));
   checks.push(await checkPrismaConnect());
+  checks.push(await checkDiscord());
 
   const overall = summarizeOverall(checks);
   printChecks(checks, overall);

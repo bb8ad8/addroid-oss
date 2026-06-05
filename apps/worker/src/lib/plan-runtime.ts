@@ -25,7 +25,7 @@ import {
   type SubmissionGuardsYaml,
 } from "@addroid/ops-schemas";
 import { isManagedStorageKey } from "./storage-key-validation.js";
-export type PlanRunSource = "web" | "web-chat" | "slack-chat" | "agent-task" | "ci" | "cli";
+export type PlanRunSource = "web" | "web-chat" | "slack-chat" | "discord-chat" | "agent-task" | "ci" | "cli";
 
 export interface PlanCounts {
   creates: number;

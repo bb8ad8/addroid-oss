@@ -23,6 +23,8 @@ import type {
   RecordMergeAuditInput,
   RecordPollingStateInput,
   RecordPrApprovalInput,
+  DiscordCommandAuditInput,
+  DiscordCommandAuditWriter,
   SlackCommandAuditInput,
   SlackCommandAuditWriter,
   StartCronRunInput,
@@ -31,6 +33,8 @@ import type {
   UpsertPullRequestInput,
 } from "@addroid/queue";
 import type {
+  DiscordNotificationAuditInput,
+  DiscordNotificationAuditWriter,
   NotificationAuditInput,
   NotificationAuditWriter,
 } from "@addroid/config";
@@ -787,6 +791,50 @@ export function createSlackCommandAuditStore(
 }
 
 /**
+ * Discord slash command 実行を audit_logs に 1 行残す writer
+ * (`createSlackCommandAuditStore` の Discord 版)。
+ */
+export function createDiscordCommandAuditStore(
+  prisma: PrismaClient,
+  workspaceId: string
+): DiscordCommandAuditWriter {
+  return {
+    async recordSlashCommandExecution(
+      input: DiscordCommandAuditInput
+    ): Promise<void> {
+      const metadata: Prisma.InputJsonValue = {
+        subcommand: input.subcommand,
+        subcommandTarget: input.subcommandTarget,
+        discordUserId: input.discordUserId,
+        discordUserName: input.discordUserName,
+        channelId: input.channelId,
+        guildId: input.guildId,
+        state: input.state,
+        handlerState: input.handlerState,
+        postedToResponseUrl: input.postedToResponseUrl,
+        ...(input.postError !== undefined ? { postError: input.postError } : {}),
+        ...(input.handlerError !== undefined
+          ? { handlerError: input.handlerError }
+          : {}),
+        ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
+        durationMs: input.durationMs,
+        finishedAt: input.finishedAt,
+      };
+      await prisma.auditLog.create({
+        data: {
+          workspaceId,
+          actor: input.actor,
+          action: input.action,
+          target: input.target,
+          ref: input.ref,
+          metadata,
+        },
+      });
+    },
+  };
+}
+
+/**
  * implementation item: `dispatchSlackNotification` から呼ばれる audit_logs writer。
  * 1 回の dispatch につき 1 行を `audit_logs` に追加する。
  *
@@ -833,6 +881,55 @@ export function createNotificationAuditStore(
           actor: "addroid",
           action,
           target: `slack_notification:${input.kind}`,
+          ref,
+          metadata,
+        },
+      });
+    },
+  };
+}
+
+/**
+ * Discord 通知 dispatch を audit_logs に 1 行残す writer
+ * (`createNotificationAuditStore` の Discord 版)。
+ */
+export function createDiscordNotificationAuditStore(
+  prisma: PrismaClient,
+  workspaceId: string
+): DiscordNotificationAuditWriter {
+  return {
+    async recordNotificationDispatch(
+      input: DiscordNotificationAuditInput
+    ): Promise<void> {
+      const action =
+        input.state === "sent"
+          ? "notification.sent"
+          : input.state === "failed"
+            ? "notification.failed"
+            : "notification.skipped_no_discord";
+      const metadata: Prisma.InputJsonValue = {
+        kind: input.kind,
+        state: input.state,
+        ...(input.discordMessageId !== undefined
+          ? { discordMessageId: input.discordMessageId }
+          : {}),
+        ...(input.channelId !== undefined ? { channelId: input.channelId } : {}),
+        ...(input.errorCode !== undefined ? { errorCode: input.errorCode } : {}),
+        ...(input.errorMessage !== undefined
+          ? { errorMessage: input.errorMessage }
+          : {}),
+        preparedAt: input.preparedAt,
+        ...(input.sentAt !== undefined ? { sentAt: input.sentAt } : {}),
+      };
+      const ref =
+        input.discordMessageId ??
+        (input.errorCode ? `error:${input.errorCode}` : input.state);
+      await prisma.auditLog.create({
+        data: {
+          workspaceId,
+          actor: "addroid",
+          action,
+          target: `discord_notification:${input.kind}`,
           ref,
           metadata,
         },

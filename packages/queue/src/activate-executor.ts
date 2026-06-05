@@ -64,8 +64,11 @@ export interface ActivateNodeSnapshot {
  *           separate from PR approval" の例外として許可される (UI design plan §0.18)。
  *           Web/CLI と同じ `runActivate` パイプラインを通り、actor + source の
  *           両方で経路が分かるよう metadata に書かれる。
+ * - `discord`: `/adops activate <hierarchy_id>` via Discord (audited as
+ *           `discord:<user_id>`)。Slack と同じ「PR 承認とは別の明示的 audited
+ *           operation」として許可される。
  */
-export type ActivateSource = "cli" | "web" | "slack";
+export type ActivateSource = "cli" | "web" | "slack" | "discord";
 
 export interface ActivateRequest {
   hierarchyId: string;
@@ -207,7 +210,8 @@ export type ActivateApprovalDecision = "approved" | "rejected";
 export type ActivateDecisionSource =
   | "web_activate"
   | "slack_activate"
-  | "cli_activate";
+  | "cli_activate"
+  | "discord_activate";
 
 export interface ActivateApprovalInput {
   /** Activate 対象の workspace。runActivate は workspace 不明な経路では呼ばない。 */
@@ -333,6 +337,8 @@ export function deriveActivateDecisionSource(
       return "slack_activate";
     case "cli":
       return "cli_activate";
+    case "discord":
+      return "discord_activate";
   }
 }
 

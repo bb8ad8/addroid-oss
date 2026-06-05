@@ -143,6 +143,13 @@ export interface SlackCommandHandlersDeps {
 
   /** test seam: process.env (executeActivate に渡す)。 */
   env?: NodeJS.ProcessEnv;
+
+  /**
+   * このハンドラ群を駆動した対話チャネル。activate の actor 帰属 / `source` /
+   * note 文言に使う。既定は "slack" で従来挙動を完全維持する。Discord 経路は
+   * "discord" を渡し、actor=`discord:<id>` / source="discord" で audit される。
+   */
+  commandSource?: "slack" | "discord";
 }
 
 export function createSlackCommandHandlers(
@@ -809,12 +816,13 @@ async function handleActivate(
         errorCode: "node_not_found",
       };
     }
-    const slackUserId = (payload.slackUserId ?? "").trim();
-    const slackUserName = (payload.slackUserName ?? "").trim();
-    const actor = `slack:${slackUserId.length > 0 ? slackUserId : "_"}`;
-    const note = slackUserName
-      ? `slack /adops activate by ${slackUserName} (${slackUserId})`
-      : `slack /adops activate by ${slackUserId || "unknown"}`;
+    const channel = deps.commandSource ?? "slack";
+    const userId = (payload.slackUserId ?? "").trim();
+    const userName = (payload.slackUserName ?? "").trim();
+    const actor = `${channel}:${userId.length > 0 ? userId : "_"}`;
+    const note = userName
+      ? `${channel} /adops activate by ${userName} (${userId})`
+      : `${channel} /adops activate by ${userId || "unknown"}`;
     const { summary } = await executeActivate({
       prisma: deps.prisma,
       metaAdapter: deps.metaAdapter,
@@ -823,7 +831,7 @@ async function handleActivate(
       request: {
         hierarchyId,
         actor,
-        source: "slack",
+        source: channel,
         note,
       },
     });

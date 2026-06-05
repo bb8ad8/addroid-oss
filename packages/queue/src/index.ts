@@ -360,6 +360,44 @@ export {
   type SlackAgentJobPayload,
 } from "./slack-agent.js";
 
+// Discord queue integration (transport-parallel to Slack).
+export {
+  DISCORD_COMMAND_JOB_NAME,
+  DISCORD_SLASH_COMMAND,
+  DISCORD_SLASH_SUBCOMMANDS,
+  buildDiscordCommandSingletonKey,
+  enqueueDiscordCommandJob,
+  parseDiscordCommand,
+  postDiscordInteractionResponse,
+  runDiscordCommandJob,
+  type DiscordCommandAuditInput,
+  type DiscordCommandAuditWriter,
+  type DiscordCommandBoss,
+  type DiscordCommandJobPayload,
+  type DiscordCommandJobResult,
+  type DiscordCommandJobState,
+  type DiscordCommandParseFailure,
+  type DiscordCommandParseResult,
+  type DiscordCommandSendOptions,
+  type DiscordResponseFetch,
+  type EnqueueDiscordCommandOptions,
+  type EnqueueDiscordCommandResult,
+  type ParsedDiscordCommand,
+  type RawDiscordCommandRequest,
+  type RunDiscordCommandJobOptions,
+} from "./discord-command.js";
+
+export {
+  DISCORD_AGENT_JOB_NAME,
+  buildDiscordAgentSingletonKey,
+  enqueueDiscordAgentJob,
+  type DiscordAgentAttachmentReference,
+  type DiscordAgentEventType,
+  type DiscordAgentJobPayload,
+  type EnqueueDiscordAgentJobOptions,
+  type EnqueueDiscordAgentJobResult,
+} from "./discord-agent.js";
+
 export {
   startSlackSocketReceiver,
   type SlackInstallation,
