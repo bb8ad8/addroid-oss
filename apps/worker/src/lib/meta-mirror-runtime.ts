@@ -228,12 +228,17 @@ async function fetchGraphRows(
             "updated_time",
             "creative{id,name,title,body,call_to_action_type,object_url,template_url,object_story_spec,thumbnail_url,image_url,video_id,effective_object_story_id,instagram_user_id,instagram_permalink_url}",
           ].join(",");
+  // ads は creative{...} 展開が重く、広告数の多いアカウントでは limit=500 だと
+  // Meta が "Please reduce the amount of data" (code 1) を返す。edge ごとに
+  // ページサイズと最大ページ数を調整し、小さめページ×多ページで取り切る。
+  const pageLimit = edge === "ads" ? 50 : 200;
+  const maxPages = edge === "ads" ? 60 : 25;
   let url = new URL(`https://graph.facebook.com/${META_GRAPH_API_VERSION}/${accountId}/${edge}`);
   url.searchParams.set("fields", fields);
-  url.searchParams.set("limit", "500");
+  url.searchParams.set("limit", String(pageLimit));
 
   const rows: GraphRow[] = [];
-  for (let page = 0; page < 10 && url; page += 1) {
+  for (let page = 0; page < maxPages && url; page += 1) {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
