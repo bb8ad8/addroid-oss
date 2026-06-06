@@ -7,6 +7,7 @@
 import {
   LocalDiskStorage,
   downloadDiscordAttachment,
+  getRecentDiscordMessages,
   postDiscordMessage,
   type DiscordFetch,
 } from "@addroid/config";
@@ -50,9 +51,11 @@ export async function runDiscordAgentJob(
   opts: RunDiscordAgentJobOptions
 ): Promise<DiscordAgentJobResult> {
   const actor = `discord:${opts.payload.discordUserId}`;
+  const conversationContext = await buildConversationContext(opts);
 
   const transport: ChatAgentTransport = {
     inputText: opts.payload.text,
+    ...(conversationContext ? { conversationContext } : {}),
     actor,
     surface: "discord-chat",
     toolSource: "discord-chat",
@@ -108,6 +111,86 @@ export async function runDiscordAgentJob(
     },
     transport
   );
+}
+
+/**
+ * 直近の Discord 会話履歴を取得し、エージェントに渡す「会話メモリ + 一問一答ガイド」
+ * の文脈文字列を組み立てる。各 Discord メッセージは独立ジョブで処理され記憶を持たない
+ * ため、ここで直近のやり取りを文脈として与えることで多メッセージにまたがる対話を可能にする。
+ * 取得失敗は致命的でないので undefined を返す (会話文脈なしで通常応答)。
+ */
+async function buildConversationContext(
+  opts: RunDiscordAgentJobOptions
+): Promise<string | undefined> {
+  const sections: string[] = [];
+
+  // 1) アカウント名簿: ユーザーは店名/通称でアカウントを指す。ID は知らない前提で、
+  //    名前→key の対応表を渡して「ID を聞き返さず名前で照合」させる。
+  try {
+    const accounts = await opts.prisma.adAccount.findMany({
+      where: { workspaceId: opts.workspaceId, active: true },
+      select: { key: true, displayName: true },
+      orderBy: { displayName: "asc" },
+      take: 200,
+    });
+    if (accounts.length > 0) {
+      const directory = accounts
+        .map((a) => `- ${a.displayName} → ${a.key}`)
+        .join("\n");
+      sections.push(
+        [
+          "【広告アカウント名簿】",
+          "ユーザーは店名/通称 (例: めぐる, MEGURU, 上野店) でアカウントを指します。技術的な ID (act_...) は知りません。",
+          "下の一覧から名前で照合して対象を特定し、ID を聞き返さないでください。複数該当する場合のみ候補名 (ID ではなく名前) を挙げて選ばせてください。",
+          directory,
+        ].join("\n")
+      );
+    }
+  } catch (err) {
+    opts.logger?.warn(
+      `[worker] discord_agent account directory fetch failed: ${(err as Error).message}`
+    );
+  }
+
+  // 2) 会話履歴: 各メッセージは独立ジョブなので、直近のやり取りを文脈として渡す。
+  try {
+    const history = await getRecentDiscordMessages(
+      opts.botToken,
+      opts.payload.channelId,
+      10,
+      opts.discordFetch ?? (globalThis.fetch as unknown as DiscordFetch)
+    );
+    const transcript = history
+      .filter((m) => m.id !== opts.payload.messageId)
+      .filter((m) => m.content && m.content.trim().length > 0)
+      // 定型の処理中メッセージはノイズなので除外。
+      .filter((m) => !m.content.startsWith("受け付けました。AdDroid Agent"))
+      .map((m) => `${m.isBot ? "AdDroid" : m.authorUsername || "user"}: ${m.content.trim()}`)
+      .join("\n");
+    if (transcript) {
+      sections.push(`【継続中の Discord 会話です。直近のやり取り】\n${transcript}`);
+    }
+  } catch (err) {
+    opts.logger?.warn(
+      `[worker] discord_agent history fetch failed (会話文脈なしで継続): ${(err as Error).message}`
+    );
+  }
+
+  // 3) 応答ガイド (スマホの非エンジニアでも使えるように)
+  sections.push(
+    [
+      "【応答ガイド】",
+      "- ユーザーは技術用語や ID を知らない前提。アカウントは上の名簿から名前で特定し、ID は聞き返さない。",
+      "- 不足情報 (入札戦略・日予算・配信先URL など) は推測せず 1 つずつ、平易な言葉で短く質問する。選択肢があるものは候補を 2〜3 個添えて選びやすくする。",
+      "- 情報が揃ったら、対象アカウントに限定したツールで実行する。全アカウント一括の操作はしない。",
+      "- すでに会話で確定済みの項目は再度聞かない。",
+      "【成果・課題分析の方法】",
+      "- 目標値 (登録単価/CPA など) を確認し、合計値だけでなく『直近(date_preset=last_7d)』と『前期間(last_14d や last_30d)』を比較してトレンド(悪化/改善)を示す。",
+      "- 期間指定は query_meta_ads の date_preset (today/yesterday/last_7d/last_14d/last_30d/this_month/last_month 等) を優先し、自前の日付計算は避ける。エラー時はエラーメッセージに従って引数を直して 1 回だけ再試行する。",
+    ].join("\n")
+  );
+
+  return sections.length > 0 ? sections.join("\n\n") : undefined;
 }
 
 async function loadDiscordReferenceImages(

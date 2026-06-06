@@ -366,6 +366,51 @@ export async function postDiscordMessage(
   };
 }
 
+export interface DiscordMessageSummary {
+  id: string;
+  authorId: string;
+  authorUsername: string;
+  isBot: boolean;
+  content: string;
+}
+
+interface RawDiscordMessage {
+  id?: unknown;
+  content?: unknown;
+  author?: { id?: unknown; username?: unknown; bot?: unknown } | null;
+}
+
+/**
+ * チャンネル/DM の直近メッセージを新しい順→古い順 (chronological) に取得する。
+ * 対話エージェントの「会話メモリ」(直前のやり取りを文脈として渡す) に使う。
+ * Read Message History 権限が必要。DM では bot 自身の DM 履歴を読める。
+ */
+export async function getRecentDiscordMessages(
+  botToken: string,
+  channelId: string,
+  limit = 10,
+  fetchImpl: DiscordFetch = (globalThis as { fetch?: DiscordFetch }).fetch as DiscordFetch
+): Promise<DiscordMessageSummary[]> {
+  const capped = Math.max(1, Math.min(limit, 50));
+  const raw = await callDiscordApi<RawDiscordMessage[]>(
+    `/channels/${encodeURIComponent(channelId)}/messages?limit=${capped}`,
+    "GET",
+    botToken,
+    fetchImpl
+  );
+  const list = Array.isArray(raw) ? raw : [];
+  // Discord は新しい順で返すので、文脈用に古い順へ反転する。
+  return list
+    .map((m): DiscordMessageSummary => ({
+      id: typeof m.id === "string" ? m.id : "",
+      authorId: typeof m.author?.id === "string" ? m.author.id : "",
+      authorUsername: typeof m.author?.username === "string" ? m.author.username : "",
+      isBot: m.author?.bot === true,
+      content: typeof m.content === "string" ? m.content : "",
+    }))
+    .reverse();
+}
+
 /**
  * Discord 添付ファイル (signed CDN URL) を取得する。CDN URL 自体が署名付きなので
  * Authorization ヘッダは付けない。Slack の {@link downloadSlackPrivateFile} と対称。

@@ -172,6 +172,7 @@ export {
   buildDiscordInstallationMetadata,
   downloadDiscordAttachment,
   getDiscordChannel,
+  getRecentDiscordMessages,
   postDiscordMessage,
   validateDiscordInputs,
   verifyDiscordBotToken,
@@ -181,6 +182,7 @@ export {
   type DiscordEmbed,
   type DiscordFetch,
   type DiscordInstallationMetadata,
+  type DiscordMessageSummary,
   type DiscordPostMessageOptions,
   type DiscordPostMessageResponse,
 } from "./discord-auth.js";

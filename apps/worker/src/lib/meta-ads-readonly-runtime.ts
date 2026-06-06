@@ -43,7 +43,9 @@ export async function runMetaAdsReadOnlyQuery(opts: {
               until: readMetaStringArg(opts.args, "until") ?? readMetaStringArg(opts.args, "since")!,
             }
           : undefined,
-      timeIncrement: readMetaStringArg(opts.args, "timeIncrement", "time_increment") ?? undefined,
+      timeIncrement: normalizeTimeIncrement(
+        readMetaStringArg(opts.args, "timeIncrement", "time_increment")
+      ),
       breakdowns: readStringArray(opts.args.breakdowns).concat(readStringArray(opts.args.breakdown)),
       limit: readPositiveInt(opts.args.limit) ?? 100,
     });
@@ -257,6 +259,22 @@ function graphInsightsLevel(args: Record<string, unknown>): "account" | "campaig
   if (readMetaStringArg(args, "campaignId", "campaign_id")) return "campaign";
   const level = readMetaStringArg(args, "level");
   return level === "campaign" || level === "adset" || level === "ad" ? level : "account";
+}
+
+/**
+ * Meta insights の `time_increment` を有効値だけに正規化する。
+ * Meta が受け付けるのは整数 1〜90 (日数)・"monthly"・"all_days" のみ。
+ * それ以外 (例: "weekly", "daily", "7d") は HTTP 400 になるので落として
+ * 期間集計 (= 増分なし) にフォールバックする。エージェントが誤った値を渡しても
+ * 無駄な 400 を出さないための防御。
+ */
+function normalizeTimeIncrement(raw: string | null | undefined): string | undefined {
+  const v = raw?.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === "monthly" || v === "all_days") return v;
+  const n = Number(v);
+  if (Number.isInteger(n) && n >= 1 && n <= 90) return String(n);
+  return undefined;
 }
 
 type MetaReadOnlyResource =

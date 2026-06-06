@@ -57,6 +57,11 @@ export interface ChatAgentCoreDeps {
 export interface ChatAgentTransport {
   /** ユーザー入力テキスト。 */
   inputText: string;
+  /**
+   * 直前の会話文脈 (任意)。指定すると input の先頭に前置きされ、エージェントが
+   * 過去のやり取りを踏まえて応答できる (多メッセージにまたがる一問一答を可能にする)。
+   */
+  conversationContext?: string;
   /** `slack:<id>` / `discord:<id>` 等。audit_logs.actor と executeWorkerAgentTool に渡す。 */
   actor: string;
   /** Agent surface (tool 許可判定に使う)。 */
@@ -108,10 +113,10 @@ export async function runChatAgentJob(
     const agentContext = await buildAgentContext(process.env);
     const webUrl = deps.webUrl ?? agentContext.webUrl;
     const referenceImagePaths = await transport.loadReferenceImages();
-    const agentInput = appendReferenceImageContext(
-      transport.inputText,
-      referenceImagePaths
-    );
+    const baseInput = transport.conversationContext
+      ? `${transport.conversationContext}\n\n${transport.inputText}`
+      : transport.inputText;
+    const agentInput = appendReferenceImageContext(baseInput, referenceImagePaths);
     const seenTools = new Set<string>();
     for (let i = 0; i < MAX_AGENT_TURNS; i += 1) {
       const turn = await runAgentTurn({
