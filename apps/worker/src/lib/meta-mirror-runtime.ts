@@ -72,6 +72,11 @@ export interface RunMetaMirrorSyncOptions {
   actor: string;
   source: string;
   includeMetrics?: boolean;
+  /**
+   * 実績取得の対象日 (YYYY-MM-DD)。未指定ならアカウント TZ の「当日」。
+   * 朝の定期取込で「前日(完全な1日)」を積みたい場合に上書きする。
+   */
+  metricDate?: string | null;
 }
 
 const CONVERSION_ACTION_TYPES = [
@@ -102,7 +107,10 @@ export async function runMetaMirrorSync(
     ads,
   });
 
-  const metricDate = currentDateForTimeZone(account.timezoneName);
+  const metricDate =
+    (typeof opts.metricDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(opts.metricDate.trim())
+      ? opts.metricDate.trim()
+      : null) ?? currentDateForTimeZone(account.timezoneName);
   let metricResult: MetaMirrorSyncResult["metrics"] = {
     metricDate,
     rows: 0,
