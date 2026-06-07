@@ -207,10 +207,12 @@ async function resolveDefaultSubmitRoot(env: NodeJS.ProcessEnv): Promise<string 
   }
 }
 
-function normalizeService(value: string): "meta" | "github" | "llm" | "slack" | null {
+function normalizeService(
+  value: string
+): "meta" | "github" | "llm" | "slack" | "discord" | null {
   const v = value.trim().toLowerCase();
   if (v === "ai" || v === "llm") return "llm";
-  if (v === "meta" || v === "github" || v === "slack") return v;
+  if (v === "meta" || v === "github" || v === "slack" || v === "discord") return v;
   return null;
 }
 
@@ -311,9 +313,11 @@ function printConnectHelp(): void {
         "  addroid connect github",
         "  addroid connect ai",
         "  addroid connect slack",
+        "  addroid connect discord --bot-token <token> --guild <id> --channel <id>",
         "",
         "Notes:",
         "  - ai starts by choosing Codex app-server, OpenAI API key, or Claude API key.",
+        "  - discord uses an outbound Gateway connection; enable the MessageContent privileged intent.",
         "",
       ].join("\n")
     );
@@ -328,9 +332,11 @@ function printConnectHelp(): void {
       "  addroid connect github",
       "  addroid connect ai",
       "  addroid connect slack",
+      "  addroid connect discord --bot-token <token> --guild <id> --channel <id>",
       "",
       "Notes:",
       "  - ai は Codex app-server / OpenAI API key / Claude API key の選択から開始します。",
+      "  - discord はアウトバウンドの Gateway 接続のみを使い、MessageContent 特権インテントの有効化が必要です。",
       "",
     ].join("\n")
   );

@@ -11,6 +11,8 @@ import {
   SCHEDULED_TASK_JOB_NAME,
   SLACK_AGENT_JOB_NAME,
   SLACK_COMMAND_JOB_NAME,
+  DISCORD_AGENT_JOB_NAME,
+  DISCORD_COMMAND_JOB_NAME,
   bootPgBoss,
   buildAdAccountLockKey,
   failCronRun,
@@ -26,6 +28,7 @@ import {
   runPerformanceSnapshotRetentionOnce,
   scheduleCron,
   runSlackCommandJob,
+  runDiscordCommandJob,
   startCronRun,
   type DailyReportSummary,
   type DailyReportInsightsProvider,
@@ -39,6 +42,8 @@ import {
   type RetentionSweepSummary,
   type SlackCommandJobPayload,
   type SlackAgentJobPayload,
+  type DiscordCommandJobPayload,
+  type DiscordAgentJobPayload,
 } from "@addroid/queue";
 import type PgBoss from "pg-boss";
 import { prisma, type PrismaClient } from "@addroid/db";
@@ -58,6 +63,8 @@ import {
   createGithubPollStore,
   createNotificationAuditStore,
   createSlackCommandAuditStore,
+  createDiscordCommandAuditStore,
+  createDiscordNotificationAuditStore,
   ensureWorkspace,
 } from "./lib/prisma-stores.js";
 import { createSlackCommandHandlers } from "./lib/slack-command-runtime.js";
@@ -65,6 +72,10 @@ import {
   createWorkerSlackNotifier,
   type WorkerSlackNotifier,
 } from "./lib/slack-notifier-runtime.js";
+import {
+  createWorkerDiscordNotifier,
+  type WorkerDiscordNotifier,
+} from "./lib/discord-notifier-runtime.js";
 import type { SlackNotificationPayload } from "@addroid/config";
 import { resolveGithubAdapter } from "./lib/github-adapter-wiring.js";
 import { resolveExecutionMode } from "./lib/execution-mode-resolution.js";
@@ -108,6 +119,12 @@ import {
   startSlackSocketRuntime,
 } from "./lib/slack-socket-runtime.js";
 import { runSlackAgentJob } from "./lib/slack-agent-runtime.js";
+import { runDiscordAgentJob } from "./lib/discord-agent-runtime.js";
+import {
+  loadDiscordInstallation,
+  startDiscordGatewayRuntime,
+  type DiscordGatewayHandle,
+} from "./lib/discord-gateway-runtime.js";
 import type { SlackSocketReceiverHandle } from "@addroid/queue";
 import {
   rescheduleEnabledAgentTasks,
@@ -251,7 +268,19 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
       warn: (msg) => log.warn(msg),
     },
   });
-  const sendSlackNotification = makeSafeNotificationSender(slackNotifier, log);
+  // Discord は Slack と並ぶ第2の通知チャネル。同じ通知ペイロードモデルを共有し、
+  // 未設定なら `skipped_no_discord` に倒れる。producer 側は無改変で、下記の
+  // `sendSlackNotification` が Slack + Discord の両方へ fan-out する。
+  const discordNotificationAudit = createDiscordNotificationAuditStore(prisma, workspace.id);
+  const discordNotifier = createWorkerDiscordNotifier({
+    prisma,
+    audit: discordNotificationAudit,
+    logger: {
+      info: (msg) => log.info(msg),
+      warn: (msg) => log.warn(msg),
+    },
+  });
+  const sendSlackNotification = makeSafeNotificationSender(slackNotifier, log, discordNotifier);
   const webBaseUrl = process.env.ADDROID_WEB_BASE_URL?.trim() || null;
 
   // this implementation: daily_report cron は LLM Provider と insights provider
@@ -1409,7 +1438,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
   // - 各ハンドラは throw しない契約。万一 throw しても `runSlackCommandJob` が
   //   catch して `slash_command.failed` audit + Slack 通知に倒すため、cron /
   //   apply には伝播しない。
-  const slackCommandHandlers = createSlackCommandHandlers({
+  const commandHandlerDeps = {
     prisma,
     workspaceId: workspace.id,
     adAccountLockProvider,
@@ -1466,8 +1495,16 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
     metaAdapter: metaAdapterSelection.adapter,
     env: process.env,
     webBaseUrl,
+  };
+  // Slack / Discord は同一の 6 ハンドラを共有し、activate の actor 帰属 / source /
+  // note 文言だけ `commandSource` で分岐する (Slack=既定、Discord=明示)。
+  const slackCommandHandlers = createSlackCommandHandlers(commandHandlerDeps);
+  const discordCommandHandlers = createSlackCommandHandlers({
+    ...commandHandlerDeps,
+    commandSource: "discord",
   });
   const slackCommandAudit = createSlackCommandAuditStore(prisma, workspace.id);
+  const discordCommandAudit = createDiscordCommandAuditStore(prisma, workspace.id);
 
   await boss.work(SLACK_COMMAND_JOB_NAME, async (jobs) => {
     for (const job of jobs) {
@@ -1536,6 +1573,76 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
     }
   });
 
+  // Discord slash command consumer (Slack の slack_command と対称)。Discord Gateway
+  // 受信機が `/adops <subcommand>` を defer 後に enqueue する。結果は interaction
+  // webhook へ返信され、`DiscordCommandAuditWriter` が audit_logs に
+  // slash_command.completed | slash_command.failed | activate.via_discord を残す。
+  await boss.work(DISCORD_COMMAND_JOB_NAME, async (jobs) => {
+    for (const job of jobs) {
+      const payload = job.data as DiscordCommandJobPayload;
+      try {
+        const result = await runDiscordCommandJob({
+          payload,
+          handlers: discordCommandHandlers,
+          audit: discordCommandAudit,
+        });
+        log.info(
+          `[worker] discord_command ${payload.subcommand}` +
+            (payload.target ? ` ${payload.target}` : "") +
+            `: ${result.state}` +
+            ` (posted=${result.postedToResponseUrl}, durationMs=${result.durationMs})`
+        );
+      } catch (err) {
+        log.warn(
+          `[worker] discord_command ${payload?.subcommand ?? "<unknown>"} crashed: ${(err as Error).message}`
+        );
+      }
+    }
+  });
+
+  // Discord agent consumer (Slack の slack_agent と対称)。対象チャンネルの非bot発言を
+  // 共有 Agent ループにルーティングする。bot トークンはペイロードに含めず、ここで
+  // installation を都度復号して取得する。
+  await boss.work(DISCORD_AGENT_JOB_NAME, async (jobs) => {
+    for (const job of jobs) {
+      const payload = job.data as DiscordAgentJobPayload;
+      try {
+        const installation = await loadDiscordInstallation({
+          prisma,
+          logger: {
+            info: (msg) => log.info(msg),
+            warn: (msg) => log.warn(msg),
+            error: (msg) => log.error(msg),
+          },
+        });
+        if (!installation) {
+          log.warn("[worker] discord_agent skipped: Discord installation is not configured.");
+          continue;
+        }
+        const result = await runDiscordAgentJob({
+          payload,
+          prisma,
+          workspaceId: workspace.id,
+          provider: llmSelection.provider,
+          boss,
+          botToken: installation.botToken,
+          githubAdapter: getGithubAdapter(),
+          ...(webBaseUrl ? { webUrl: webBaseUrl } : {}),
+          logger: {
+            info: (msg) => log.info(msg),
+            warn: (msg) => log.warn(msg),
+          },
+        });
+        log.info(
+          `[worker] discord_agent ${payload.eventType} ${payload.channelId}: ${result.status}` +
+            ` (postedProcessing=${result.postedProcessing}, postedFinal=${result.postedFinal}, durationMs=${result.durationMs})`
+        );
+      } catch (err) {
+        log.warn(`[worker] discord_agent crashed: ${(err as Error).message}`);
+      }
+    }
+  });
+
   // regression fix / the current implementation: Slack Socket Mode `/adops` 受信機を起動する。
   // Slack 連携は完全に任意なので、`startSlackSocketRuntime` は token 未設定 /
   // ENCRYPTION_KEY 未設定 / 復号失敗のいずれの場合も `null` を返し、worker は
@@ -1569,8 +1676,39 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
     );
   }
 
+  // Discord Gateway `/adops` 受信機を起動する (Slack Socket Mode と対称)。Discord 連携も
+  // 完全に任意なので、`startDiscordGatewayRuntime` は未設定 / 復号失敗 / login 失敗の
+  // いずれでも `null` を返し、worker は core 実行系を通常通り稼働させる。Gateway WebSocket は
+  // 常時アウトバウンド接続で、inbound webhook は一切開かない (outbound-only 原則)。
+  let discordGatewayHandle: DiscordGatewayHandle | null = null;
+  try {
+    discordGatewayHandle = await startDiscordGatewayRuntime({
+      prisma,
+      boss,
+      logger: {
+        info: (msg) => log.info(msg),
+        warn: (msg) => log.warn(msg),
+        error: (msg) => log.error(msg),
+      },
+    });
+    if (discordGatewayHandle) {
+      log.info(
+        `[worker] discord gateway receiver: ${discordGatewayHandle.getState()} (/adops)`
+      );
+    } else {
+      log.info(
+        "[worker] discord gateway receiver: skipped (Discord is optional and unconfigured)"
+      );
+    }
+  } catch (err) {
+    // startDiscordGatewayRuntime は throw しない契約だが、防御的に握り潰す。
+    log.warn(
+      `[worker] discord gateway receiver failed to start: ${(err as Error).message}`
+    );
+  }
+
   log.info(
-    `[worker] ready. registered ${CRON_PRESETS.length} cron preset(s), execute_apply receiver, slack_command receiver, slack_agent receiver.`
+    `[worker] ready. registered ${CRON_PRESETS.length} cron preset(s), execute_apply receiver, slack_command receiver, slack_agent receiver, discord_command receiver, discord_agent receiver.`
   );
 
   let stopping = false;
@@ -1583,6 +1721,15 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
       } catch (err) {
         log.warn(
           `[worker] error during slack socket stop: ${(err as Error).message}`
+        );
+      }
+    }
+    if (discordGatewayHandle) {
+      try {
+        await discordGatewayHandle.stop();
+      } catch (err) {
+        log.warn(
+          `[worker] error during discord gateway stop: ${(err as Error).message}`
         );
       }
     }
@@ -1853,12 +2000,13 @@ function collectAccountKeysFromOutcomes(
  * - logger には sanitize 済みの 1 行 summary のみ書き、平文 token を残さない。
  */
 function makeSafeNotificationSender(
-  notifier: WorkerSlackNotifier,
-  log: WorkerLogger
+  slackNotifier: WorkerSlackNotifier,
+  log: WorkerLogger,
+  discordNotifier?: WorkerDiscordNotifier
 ): (payload: SlackNotificationPayload) => Promise<void> {
   return async (payload: SlackNotificationPayload): Promise<void> => {
     try {
-      const result = await notifier.dispatch(payload);
+      const result = await slackNotifier.dispatch(payload);
       if (result.state === "failed") {
         log.warn(
           `[worker] slack notification ${result.kind} failed: ${result.errorCode ?? "unknown"}`
@@ -1868,6 +2016,22 @@ function makeSafeNotificationSender(
       log.warn(
         `[worker] slack notification ${payload.kind} crashed (swallowed): ${(err as Error).message}`
       );
+    }
+    // Discord fan-out: 同じ通知ペイロードモデルを使う。失敗は飲み込み、
+    // Slack と同様に core 実行系へ伝播させない。
+    if (discordNotifier) {
+      try {
+        const result = await discordNotifier.dispatch(payload);
+        if (result.state === "failed") {
+          log.warn(
+            `[worker] discord notification ${result.kind} failed: ${result.errorCode ?? "unknown"}`
+          );
+        }
+      } catch (err) {
+        log.warn(
+          `[worker] discord notification ${payload.kind} crashed (swallowed): ${(err as Error).message}`
+        );
+      }
     }
   };
 }

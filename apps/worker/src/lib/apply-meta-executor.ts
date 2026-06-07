@@ -614,10 +614,20 @@ async function postGraphMultipart(
 function graphError(status: number, json: unknown): MetaGraphApplyError {
   const error = isRecord(json) && isRecord(json.error) ? json.error : null;
   const code = typeof error?.code === "number" ? error.code : null;
-  const message =
+  const base =
     typeof error?.message === "string"
       ? error.message
       : `Meta Graph API returned HTTP ${status}`;
+  const details: string[] = [];
+  if (typeof error?.error_subcode === "number") details.push(`subcode=${error.error_subcode}`);
+  if (typeof error?.error_user_title === "string" && error.error_user_title) {
+    details.push(`title=${error.error_user_title}`);
+  }
+  if (typeof error?.error_user_msg === "string" && error.error_user_msg) {
+    details.push(`detail=${error.error_user_msg}`);
+  }
+  if (error?.error_data !== undefined) details.push(`data=${JSON.stringify(error.error_data)}`);
+  const message = details.length > 0 ? `${base} (${details.join("; ")})` : base;
   return new MetaGraphApplyError({
     message,
     exitClass: classifyGraphError(status, code),
@@ -1923,11 +1933,15 @@ function graphCampaignCreatePayload(payload: Record<string, unknown>, accountCur
     objective: readGraphString(payload, "objective"),
     status: readGraphString(payload, "status") ?? "PAUSED",
     buying_type: readGraphString(payload, "buyingType"),
-    special_ad_categories: payload.specialAdCategories,
+    special_ad_categories: payload.specialAdCategories ?? ["NONE"],
     special_ad_category_country: payload.specialAdCategoryCountry ?? payload.specialAdCategoryCountries,
     daily_budget: moneyField(payload.dailyBudget, accountCurrency),
     lifetime_budget: moneyField(payload.lifetimeBudget, accountCurrency),
-    bid_strategy: readGraphString(payload, "bidStrategy"),
+    // bid_strategy 未指定時は LOWEST_COST_WITHOUT_CAP (自動入札) を明示する。
+    // 一部のアカウントは CBO 新規キャンペーンの既定が LOWEST_COST_WITH_BID_CAP に
+    // なっており、その場合 adset.create に bid_amount が必須となって
+    // "Invalid parameter (subcode=1815857 入札価格が必要)" で失敗する。明示既定で回避。
+    bid_strategy: readGraphString(payload, "bidStrategy") ?? "LOWEST_COST_WITHOUT_CAP",
     spend_cap: moneyField(payload.spendCap, accountCurrency),
     start_time: readGraphString(payload, "startTime"),
     stop_time: readGraphString(payload, "stopTime"),
@@ -1942,9 +1956,7 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
   const countries = readCountriesFromPayload(payload);
   const targeting = isRecord(payload.targeting)
     ? payload.targeting
-    : countries.length > 0
-      ? { geo_locations: { countries } }
-      : undefined;
+    : { geo_locations: { countries: countries.length > 0 ? countries : ["JP"] } };
   const promotedObject = isRecord(payload.promotedObject)
     ? payload.promotedObject
     : buildPromotedObject(payload);
@@ -1952,9 +1964,9 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
     campaign_id: readGraphString(payload, "campaignId") ?? readGraphString(payload, "campaignRef"),
     name: readGraphString(payload, "name"),
     status: readGraphString(payload, "status") ?? "PAUSED",
-    optimization_goal: readGraphString(payload, "optimizationGoal"),
+    optimization_goal: readGraphString(payload, "optimizationGoal") ?? "LINK_CLICKS",
     optimization_sub_event: readGraphString(payload, "optimizationSubEvent"),
-    billing_event: readGraphString(payload, "billingEvent"),
+    billing_event: readGraphString(payload, "billingEvent") ?? "IMPRESSIONS",
     daily_budget: moneyField(payload.dailyBudget, accountCurrency),
     lifetime_budget: moneyField(payload.lifetimeBudget, accountCurrency),
     bid_amount: moneyField(payload.bidAmount, accountCurrency),

@@ -163,3 +163,39 @@ export {
   type SlackPlainText,
   type SlackTextObject,
 } from "./slack-notifications.js";
+
+export {
+  DISCORD_API_BASE_URL,
+  DISCORD_USER_AGENT,
+  DiscordApiError,
+  DiscordTokenValidationError,
+  buildDiscordInstallationMetadata,
+  downloadDiscordAttachment,
+  getDiscordChannel,
+  getRecentDiscordMessages,
+  postDiscordMessage,
+  validateDiscordInputs,
+  verifyDiscordBotToken,
+  type DiscordApplicationResponse,
+  type DiscordAuthInputs,
+  type DiscordChannelResponse,
+  type DiscordEmbed,
+  type DiscordFetch,
+  type DiscordInstallationMetadata,
+  type DiscordMessageSummary,
+  type DiscordPostMessageOptions,
+  type DiscordPostMessageResponse,
+} from "./discord-auth.js";
+
+export {
+  buildDiscordNotificationMessage,
+  dispatchDiscordNotification,
+  type DiscordDispatchOptions,
+  type DiscordDispatchResult,
+  type DiscordDispatchState,
+  type DiscordNotificationAuditInput,
+  type DiscordNotificationAuditWriter,
+  type DiscordNotificationMessage,
+  type NotificationKind,
+  type NotificationPayload,
+} from "./discord-notifications.js";

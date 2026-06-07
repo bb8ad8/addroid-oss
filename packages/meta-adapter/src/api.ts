@@ -53,6 +53,34 @@ export class MetaApiError extends Error {
   }
 }
 
+/**
+ * Meta のエラーレスポンス本文から人間可読の理由を抜き出す。
+ * 本文に access token は含まれない (token は Authorization ヘッダ送信のため) が、
+ * 念のため短く truncate する。理由が取れない場合は空文字。
+ */
+function extractMetaErrorDetail(body: string): string {
+  if (!body) return "";
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: {
+        message?: string;
+        error_user_title?: string;
+        error_user_msg?: string;
+        code?: number;
+      };
+    };
+    const e = parsed?.error;
+    if (!e) return "";
+    const text =
+      [e.error_user_title, e.error_user_msg, e.message]
+        .find((s): s is string => typeof s === "string" && s.length > 0) ?? "";
+    if (!text) return "";
+    return (typeof e.code === "number" ? `(#${e.code}) ${text}` : text).slice(0, 300);
+  } catch {
+    return body.slice(0, 200);
+  }
+}
+
 async function fetchGraph<T>(
   fetchImpl: typeof fetch,
   path: string,
@@ -74,10 +102,11 @@ async function fetchGraph<T>(
   const res = await fetchGraphWithRetry(request, origin);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new MetaApiError(`${origin}: Meta Graph HTTP ${res.status}`, {
-      status: res.status,
-      payload: text,
-    });
+    const detail = extractMetaErrorDetail(text);
+    throw new MetaApiError(
+      `${origin}: Meta Graph HTTP ${res.status}${detail ? ` — ${detail}` : ""}`,
+      { status: res.status, payload: text }
+    );
   }
   const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | T | null;
   if (!json || typeof json !== "object") {
@@ -107,10 +136,11 @@ async function fetchGraphUrl<T>(
   const res = await fetchGraphWithRetry(request, origin);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new MetaApiError(`${origin}: Meta Graph HTTP ${res.status}`, {
-      status: res.status,
-      payload: text,
-    });
+    const detail = extractMetaErrorDetail(text);
+    throw new MetaApiError(
+      `${origin}: Meta Graph HTTP ${res.status}${detail ? ` — ${detail}` : ""}`,
+      { status: res.status, payload: text }
+    );
   }
   const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | T | null;
   if (!json || typeof json !== "object") {

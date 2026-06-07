@@ -725,6 +725,7 @@ function normalizeCreativeSubmissionSource(source: PlanRunSource | undefined) {
   if (
     source === "web-chat" ||
     source === "slack-chat" ||
+    source === "discord-chat" ||
     source === "agent-task" ||
     source === "cli"
   ) {
@@ -734,7 +735,13 @@ function normalizeCreativeSubmissionSource(source: PlanRunSource | undefined) {
 }
 
 function normalizeCreativeGenerationSource(source: PlanRunSource | undefined) {
-  if (source === "web-chat" || source === "slack-chat" || source === "agent-task" || source === "cli") {
+  if (
+    source === "web-chat" ||
+    source === "slack-chat" ||
+    source === "discord-chat" ||
+    source === "agent-task" ||
+    source === "cli"
+  ) {
     return source === "cli" ? "cli-chat" : source;
   }
   return "agent-task";

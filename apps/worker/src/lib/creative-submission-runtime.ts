@@ -39,6 +39,7 @@ export type CreativeSubmissionSource =
   | "web-chat"
   | "cli-chat"
   | "slack-chat"
+  | "discord-chat"
   | "agent-task";
 
 export type CreativeSubmissionPlacementMode =
@@ -337,7 +338,7 @@ export interface CreativeGenerationResult {
   message: string;
 }
 
-export type CreativeGenerationSource = "web-chat" | "cli-chat" | "slack-chat" | "agent-task";
+export type CreativeGenerationSource = "web-chat" | "cli-chat" | "slack-chat" | "discord-chat" | "agent-task";
 type ReferenceImageUsageMode = "abstract_visual_brief" | "direct_image_reference";
 
 interface CreativeTextVariant {

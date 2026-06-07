@@ -338,6 +338,12 @@ export function sanitizeForSlack(value: string): string {
   out = out.replace(/EAA[A-Za-z0-9]{20,}/g, "EAA[REDACTED]");
   // Bearer headers
   out = out.replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer [REDACTED]");
+  // Discord bot authorization headers + bare bot tokens (base64.base64.hmac)
+  out = out.replace(/Bot\s+[A-Za-z0-9._\-]+/g, "Bot [REDACTED]");
+  out = out.replace(
+    /\b[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,}\b/g,
+    "[REDACTED]"
+  );
   // env var assignments (Meta / OpenAI / Codex / Anthropic / GitHub / Slack)
   out = out.replace(
     /(META_[A-Z0-9_]*TOKEN|OPENAI_[A-Z0-9_]*KEY|CODEX_[A-Z0-9_]*TOKEN|ANTHROPIC_[A-Z0-9_]*KEY|GITHUB_[A-Z0-9_]*TOKEN|SLACK_[A-Z0-9_]*TOKEN|SLACK_[A-Z0-9_]*SECRET)\s*=\s*\S+/g,

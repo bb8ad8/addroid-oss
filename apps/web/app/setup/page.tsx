@@ -19,6 +19,7 @@ import { KeyValueList } from "../../components/ui/KeyValueList";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { SlackConnectForm } from "./SlackConnectForm";
+import { DiscordConnectForm } from "./DiscordConnectForm";
 import { formatDateTime, resolveDisplayTimeZone } from "../../lib/datetime";
 import { resolveWebLanguage, webT } from "../../lib/i18n";
 
@@ -666,6 +667,22 @@ npm run dev:worker   # apps/worker (pg-boss) 単独`}
               ]}
             />
           )}
+        </Panel>
+
+        <Panel title="Discord 連携 (任意)" subtitle="Slack と並ぶ第2の対話チャネル">
+          <div className="setup-guide__note">
+            Discord Developer Portal で Bot を作成し、<strong>MessageContent 特権インテント</strong>を
+            有効化、対象サーバーへ招待してから、Bot トークン・サーバー(guild) ID・チャンネル ID を
+            入力してください。Gateway はアウトバウンド接続のみで公開 URL は不要です。保存した
+            token は暗号化保存され、この画面には再表示しません。
+          </div>
+          <div style={{ marginBottom: "var(--space-4)" }}>
+            <DiscordConnectForm />
+          </div>
+          <EmptyState
+            title="Discord は任意です。AdDroid は Discord なしでも動作します。"
+            description="承認待ちPR・日次レポート・budget guard 通知を Discord で受け取り、対象チャンネルで /adops コマンドやメンションから依頼できます。接続状態は `addroid doctor` で確認できます。"
+          />
         </Panel>
 
         <Panel title="Documentation" subtitle="リポジトリ内の参照ドキュメント">

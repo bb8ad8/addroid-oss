@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import {
+  getCryptoBoundary,
   inspectSecretsFile,
   parseDatabaseUrl,
   resolveAddroidPaths,
@@ -457,6 +458,96 @@ export async function checkPrismaConnect(
       state: "error",
       message: `DB 接続に失敗: ${(err as Error).message}`,
       hint: "`pg_isready -h localhost -p 5432` で起動を確認し、`npm run db:push` を実行してください。",
+    };
+  } finally {
+    try {
+      await prisma.$disconnect();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Discord 連携のヘルスチェック (read-only, ネットワーク非依存)。
+ * Discord は完全に任意なので、未接続は `skipped` (error にしない)。
+ * 接続済みの場合は ENCRYPTION_KEY で bot トークンを復号でき、metadata に
+ * guild/channel が揃っているかを確認する。
+ */
+export async function checkDiscord(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<CheckResult> {
+  if (!env.DATABASE_URL) {
+    return {
+      name: "discord",
+      state: "skipped",
+      message: "DATABASE_URL 未設定のためスキップ。",
+    };
+  }
+  let prisma: {
+    oAuthToken: {
+      findFirst: (args: unknown) => Promise<{
+        accessTokenCiphertext: string;
+        metadata: unknown;
+      } | null>;
+    };
+    $disconnect: () => Promise<void>;
+  };
+  try {
+    const mod = await import("@addroid/db");
+    prisma = mod.prisma as unknown as typeof prisma;
+  } catch {
+    return {
+      name: "discord",
+      state: "skipped",
+      message: "Prisma client 未生成のためスキップ。",
+    };
+  }
+  try {
+    const row = await prisma.oAuthToken.findFirst({
+      where: { provider: "discord" },
+      orderBy: { connectedAt: "desc" },
+      select: { accessTokenCiphertext: true, metadata: true },
+    });
+    if (!row) {
+      return {
+        name: "discord",
+        state: "skipped",
+        message: "Discord 未接続 (任意)。",
+        hint: "`addroid connect discord --bot-token <token> --guild <id> --channel <id>` で設定できます。",
+      };
+    }
+    try {
+      getCryptoBoundary(env).decrypt(row.accessTokenCiphertext);
+    } catch (err) {
+      return {
+        name: "discord",
+        state: "error",
+        message: `Discord bot トークンを復号できません: ${(err as Error).message}`,
+        hint: "ENCRYPTION_KEY を確認し、`addroid connect discord` を再実行してください。",
+      };
+    }
+    const meta = (row.metadata ?? {}) as { guildId?: unknown; channelId?: unknown };
+    const guildId = typeof meta.guildId === "string" ? meta.guildId : "";
+    const channelId = typeof meta.channelId === "string" ? meta.channelId : "";
+    if (!guildId || !channelId) {
+      return {
+        name: "discord",
+        state: "warn",
+        message: "Discord 接続済みですが guild/channel が未設定です。",
+        hint: "`addroid connect discord --guild <id> --channel <id>` を再実行してください。",
+      };
+    }
+    return {
+      name: "discord",
+      state: "ok",
+      message: `connected · guild=${guildId} channel=${channelId}`,
+    };
+  } catch (err) {
+    return {
+      name: "discord",
+      state: "warn",
+      message: `Discord 接続状態を確認できませんでした: ${(err as Error).message}`,
     };
   } finally {
     try {

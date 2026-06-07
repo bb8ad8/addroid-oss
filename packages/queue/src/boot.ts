@@ -13,6 +13,8 @@ import {
 } from "./presets.js";
 import { SLACK_AGENT_JOB_NAME } from "./slack-agent.js";
 import { SLACK_COMMAND_JOB_NAME } from "./slack-command.js";
+import { DISCORD_AGENT_JOB_NAME } from "./discord-agent.js";
+import { DISCORD_COMMAND_JOB_NAME } from "./discord-command.js";
 
 export interface BootOptions {
   databaseUrl: string;
@@ -38,6 +40,8 @@ export const RUNTIME_QUEUE_NAMES = [
   AUTOMATION_RULE_JOB_NAME,
   SLACK_COMMAND_JOB_NAME,
   SLACK_AGENT_JOB_NAME,
+  DISCORD_COMMAND_JOB_NAME,
+  DISCORD_AGENT_JOB_NAME,
 ] as const;
 
 /**
