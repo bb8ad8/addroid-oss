@@ -358,6 +358,20 @@ export interface CopyAgentInput {
   audienceSummary: string;
   brandTone: string;
   productOffer: string;
+  performanceContext?: {
+    winningExamples: Array<{
+      headline: string;
+      primaryText: string;
+      genes?: string;
+      ctr?: number;
+    }>;
+    losingExamples: Array<{
+      headline: string;
+      primaryText: string;
+      genes?: string;
+    }>;
+    geneInsights: string[];
+  };
   /** ヘッドラインの上限文字数 (Meta の Single Image Ad 既定 = 40)。 */
   headlineMaxChars?: number;
   /** 必須に含めたい単語 / フレーズ。 */
@@ -395,6 +409,8 @@ export const COPY_AGENT_SYSTEM_PROMPT = [
   "  confidence: number in [0, 1]",
   "",
   "Honor headlineMaxChars, mustIncludeKeywords, and forbiddenKeywords from the input.",
+  "When performanceContext is present, use winningExamples as structural inspiration without copying text verbatim, and avoid patterns shown in losingExamples.",
+  "Use geneInsights as directional evidence for appeal axes and tone, not as a guarantee.",
   "Do not include markdown, prose, or commentary outside the JSON object.",
 ].join("\n");
 

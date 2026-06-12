@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   runImprovementPrOnce,
   type DailyReportAdAccountSnapshot,
+  type CreativePerformanceJoinedRow,
   type ImprovementPrAgentRunResult,
   type ImprovementPrAnalystOutput,
   type ImprovementPrAuditInput,
@@ -51,11 +52,17 @@ class FakeImprovementPrStore implements ImprovementPrStore {
   creativeLinkCalls: ImprovementPrCreativeLinkInput[] = [];
   private nextAiRunId = 1;
   private nextCreativeId = 1;
-  constructor(account: DailyReportAdAccountSnapshot | null) {
+  constructor(
+    account: DailyReportAdAccountSnapshot | null,
+    private readonly creativePerformanceRows?: CreativePerformanceJoinedRow[]
+  ) {
     this.account = account;
   }
   async findAdAccount(_input: { workspaceId: string; accountKey: string }) {
     return this.account;
+  }
+  async listAdCreativePerformance() {
+    return this.creativePerformanceRows ?? [];
   }
   async createAiRun(data: AiRunCreateInputData) {
     this.aiRunCalls.push(data);
@@ -77,6 +84,57 @@ const ACCOUNT: DailyReportAdAccountSnapshot = {
   metaAccountId: "act_111",
   currency: "JPY",
 };
+
+function creativePerformanceRow(input: {
+  creativeId: string;
+  clicks: number;
+}): CreativePerformanceJoinedRow {
+  return {
+    snapshotRow: {
+      id: `snap-${input.creativeId}`,
+      accountId: ACCOUNT.id,
+      nodeType: "ad",
+      nodeKey: `ad-${input.creativeId}`,
+      metricDate: "2026-05-20",
+      impressions: 2000,
+      clicks: input.clicks,
+      conversions: 10,
+      spendMicros: 0n,
+    },
+    hierarchyRow: {
+      id: `hier-${input.creativeId}`,
+      accountId: ACCOUNT.id,
+      nodeType: "ad",
+      nodeKey: `ad-${input.creativeId}`,
+      displayName: `Ad ${input.creativeId}`,
+    },
+    creativeRow: {
+      id: input.creativeId,
+      key: `creative-${input.creativeId}`,
+      displayName: `Creative ${input.creativeId}`,
+      genes: {
+        schemaVersion: 1,
+        appealAxes: ["benefit"],
+        tone: "calm",
+        subjectType: "product",
+        colorScheme: "bright",
+        layout: "single_focus",
+        hasTextOverlay: false,
+        hasCta: true,
+        language: "ja",
+      },
+      spec: {
+        adText: {
+          headline: `Headline ${input.creativeId}`,
+          primaryText: `Primary ${input.creativeId}`,
+        },
+      },
+      prompt: `Prompt ${input.creativeId}`,
+      status: "active_on_meta",
+      updatedAt: "2026-05-21T00:00:00.000Z",
+    },
+  };
+}
 
 function makeAiRunInput(
   overrides: Partial<AiRunCreateInputData> = {}
@@ -178,6 +236,7 @@ function fail<T>(
 class FakePipelineRunner implements ImprovementPrPipelineRunner {
   calls: string[] = [];
   analystInputs: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0][] = [];
+  copyInputs: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0][] = [];
   imagePromptInputs: Parameters<ImprovementPrPipelineRunner["runImagePrompt"]>[0][] = [];
   constructor(private readonly cfg: PipelineOverrides = {}) {}
 
@@ -207,9 +266,10 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
     });
   }
   async runCopy(
-    _input: unknown
+    input: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0]
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrCopyOutput>> {
     this.calls.push("copy");
+    this.copyInputs.push(input);
     if (this.cfg.failures?.copy) return fail("copy");
     return ok("copy", {
       primary: { headline: "Try it", primaryText: "...", cta: "Sign up" },
@@ -552,6 +612,45 @@ test("pipeline: runImprovementPrOnce runs all 8 agents, opens PR, writes audit",
   assert.equal(planMeta.counts.updates, 1);
   assert.match(planMeta.summary, /plan ok for account=primary/);
   assert.equal(audit.calls[0]!.metadata.dryRunSummary, undefined);
+  assert.equal("performanceDigest" in pipeline.copyInputs[0]!, false);
+  assert.equal("performanceDigest" in pipeline.imagePromptInputs[0]!, false);
+});
+
+test("pipeline: creative performance digest is injected into copy and image_prompt inputs", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT, [
+    creativePerformanceRow({ creativeId: "winner", clicks: 200 }),
+    creativePerformanceRow({ creativeId: "loser", clicks: 20 }),
+  ]);
+  const pipeline = new FakePipelineRunner();
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    now: () => new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.ok(pipeline.copyInputs[0]!.performanceDigest);
+  assert.ok(pipeline.imagePromptInputs[0]!.performanceDigest);
+  assert.deepEqual(
+    pipeline.copyInputs[0]!.performanceDigest!.winners.map((entry) => entry.creativeId),
+    ["winner"]
+  );
+  assert.deepEqual(
+    pipeline.imagePromptInputs[0]!.performanceDigest!.losers.map((entry) => entry.creativeId),
+    ["loser"]
+  );
+  assert.equal(pipeline.copyInputs[0]!.performanceDigest!.periodStart, "2026-05-04");
+  assert.equal(pipeline.copyInputs[0]!.performanceDigest!.periodEnd, "2026-05-31");
 });
 
 test("pipeline: auto_creative_generation stops after creative QA and does not open PR", async () => {

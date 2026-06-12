@@ -50,6 +50,11 @@ import {
 } from "@addroid/llm-provider";
 import type { DailyReportAdAccountSnapshot } from "./daily-report.js";
 import {
+  buildCreativePerformanceDigest,
+  type CreativePerformanceDigest,
+  type CreativePerformanceStore,
+} from "./creative-performance.js";
+import {
   combineApprovalClassifications,
   combineApprovalDecisions,
   evaluateApprovalPolicy,
@@ -363,6 +368,11 @@ export interface ImprovementPrStore {
     accountKey: string;
   }): Promise<DailyReportAdAccountSnapshot | null>;
   /**
+   * Optional creative performance feedback source. When unavailable or empty,
+   * improvement_pr keeps the pre-feedback prompt inputs unchanged.
+   */
+  listAdCreativePerformance?: CreativePerformanceStore["listAdCreativePerformance"];
+  /**
    * 8 agent の sanitized ai_runs 行を 1 行 insert する。
    * 呼び出し側 (apps/worker) は `prisma.aiRun.create({ data })` を実行する。
    */
@@ -647,6 +657,7 @@ export interface ImprovementPrPipelineRunner {
     audienceFocus: string;
     recommendedApproach: string;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
+    performanceDigest?: CreativePerformanceDigest | null;
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrCopyOutput>>;
   runImagePrompt(input: {
     accountId: string;
@@ -659,6 +670,7 @@ export interface ImprovementPrPipelineRunner {
     strategy: ImprovementPrStrategyOutput;
     analysisWindow: ImprovementPrAnalysisWindow;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
+    performanceDigest?: CreativePerformanceDigest | null;
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrImagePromptOutput>>;
   runCreativeQa(input: {
     copy: ImprovementPrCopyOutput;
@@ -1000,6 +1012,12 @@ async function runPipelineMode(
     });
   }
 
+  const creativePerformanceDigest = await loadCreativePerformanceDigest({
+    store: opts.store,
+    accountId: account.id,
+    now: opts.now?.() ?? new Date(),
+  });
+
   // ── 3) copy ───────────────────────────────────────────────────────────
   const copy = await pipeline.runCopy({
     accountId: accountIdForAi,
@@ -1007,6 +1025,7 @@ async function runPipelineMode(
     audienceFocus: strategy.output.audienceFocus,
     recommendedApproach: strategy.output.recommendedApproach,
     creativeContext,
+    ...(creativePerformanceDigest ? { performanceDigest: creativePerformanceDigest } : {}),
   });
   const copyRow = await opts.store.createAiRun(copy.aiRunInput);
   aiRunIds.push(copyRow.id);
@@ -1034,6 +1053,7 @@ async function runPipelineMode(
     strategy: strategy.output,
     analysisWindow,
     creativeContext,
+    ...(creativePerformanceDigest ? { performanceDigest: creativePerformanceDigest } : {}),
   });
   const imageRow = await opts.store.createAiRun(imagePrompt.aiRunInput);
   aiRunIds.push(imageRow.id);
@@ -1952,6 +1972,40 @@ function defaultImprovementPrAnalysisWindow(now: Date): ImprovementPrAnalysisWin
       conversions: 0,
     },
   };
+}
+
+async function loadCreativePerformanceDigest(input: {
+  store: ImprovementPrStore;
+  accountId: string;
+  now: Date;
+}): Promise<CreativePerformanceDigest | null> {
+  if (!input.store.listAdCreativePerformance) return null;
+  const until = dateOnly(addUtcDays(input.now, -1));
+  const since = dateOnly(addUtcDays(input.now, -28));
+  try {
+    const digest = await buildCreativePerformanceDigest({
+      store: {
+        listAdCreativePerformance: (query) =>
+          input.store.listAdCreativePerformance!(query),
+      },
+      accountId: input.accountId,
+      since,
+      until,
+    });
+    return digest.entries.length > 0 ? digest : null;
+  } catch {
+    return null;
+  }
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const copy = new Date(date.getTime());
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+function dateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function composePrBody(input: {

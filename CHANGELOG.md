@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — クリエイティブ実績フィードバックループ
+
+- 直近 28 日の creative 実績から勝ち/負けパターンと遺伝子別 insight を作る digest を追加し、`improvement_pr` の copy / image_prompt agent 入力へ注入するフィードバックループを追加。
+- `/creatives` 一覧に creative 実績 (impressions / CTR / verdict) の表示を追加。
+
 ### Added — クリエイティブ遺伝子タグ
 
 - Creative QA agent が閉じた語彙の CreativeGenes (訴求軸・トーン・被写体・配色・構図など) を推定し、`creatives.genes` と metadata.json に保存するように追加。

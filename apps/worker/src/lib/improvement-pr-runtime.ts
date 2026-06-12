@@ -61,7 +61,10 @@ import {
 } from "@addroid/github-adapter";
 import {
   IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS,
+  creativePerformanceExampleGenes,
+  creativePerformanceGeneInsightLines,
   type DailyReportAdAccountSnapshot,
+  type CreativePerformanceDigest,
   type ImprovementPrAuditClassification,
   type ImprovementPrAuditDecision,
   type ImprovementPrAuditInput,
@@ -117,6 +120,96 @@ export function createPrismaImprovementPrStore(
         metaAccountId: row.metaAccountId,
         currency: "JPY",
       };
+    },
+    async listAdCreativePerformance(input) {
+      const snapshots = await prisma.performanceSnapshot.findMany({
+        where: {
+          accountId: input.accountId,
+          nodeType: "ad",
+          metricDate: {
+            gte: new Date(`${input.since}T00:00:00.000Z`),
+            lte: new Date(`${input.until}T00:00:00.000Z`),
+          },
+        },
+        select: {
+          id: true,
+          accountId: true,
+          nodeType: true,
+          nodeKey: true,
+          metricDate: true,
+          impressions: true,
+          clicks: true,
+          conversions: true,
+          spendMicros: true,
+          hierarchy: {
+            select: {
+              id: true,
+              accountId: true,
+              nodeType: true,
+              nodeKey: true,
+              displayName: true,
+            },
+          },
+        },
+      });
+      const hierarchyIds = [
+        ...new Set(
+          snapshots
+            .map((snapshot) => snapshot.hierarchy?.id)
+            .filter((id): id is string => typeof id === "string")
+        ),
+      ];
+      if (hierarchyIds.length === 0) return [];
+      const creatives = await prisma.creative.findMany({
+        where: {
+          accountId: input.accountId,
+          hierarchyId: { in: hierarchyIds },
+          status: { in: ["merged", "active_on_meta"] },
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        select: {
+          id: true,
+          key: true,
+          displayName: true,
+          genes: true,
+          spec: true,
+          prompt: true,
+          status: true,
+          updatedAt: true,
+          hierarchyId: true,
+        },
+      });
+      const creativesByHierarchy = new Map<string, typeof creatives>();
+      for (const creative of creatives) {
+        if (!creative.hierarchyId) continue;
+        const list = creativesByHierarchy.get(creative.hierarchyId);
+        if (list) {
+          list.push(creative);
+        } else {
+          creativesByHierarchy.set(creative.hierarchyId, [creative]);
+        }
+      }
+      return snapshots.flatMap((snapshot) => {
+        const hierarchy = snapshot.hierarchy;
+        if (!hierarchy) return [];
+        const creativeRows = creativesByHierarchy.get(hierarchy.id) ?? [];
+        return creativeRows.map((creative) => ({
+          snapshotRow: {
+            id: snapshot.id,
+            accountId: snapshot.accountId,
+            nodeType: snapshot.nodeType,
+            nodeKey: snapshot.nodeKey,
+            metricDate: snapshot.metricDate,
+            impressions: snapshot.impressions,
+            clicks: snapshot.clicks,
+            conversions: snapshot.conversions,
+            spendMicros: snapshot.spendMicros,
+          },
+          hierarchyRow: hierarchy,
+          creativeRow: creative,
+          ambiguous: creativeRows.length > 1,
+        }));
+      });
     },
     async createAiRun(data: AiRunCreateInputData): Promise<{ id: string }> {
       const created = await prisma.aiRun.create({
@@ -469,6 +562,9 @@ export function createImprovementPrPipelineRunner(
         ...(input.creativeContext?.brandProfile?.forbiddenTerms
           ? { forbiddenKeywords: input.creativeContext.brandProfile.forbiddenTerms }
           : {}),
+        ...(input.performanceDigest
+          ? { performanceContext: copyPerformanceContext(input.performanceDigest) }
+          : {}),
       };
       try {
         const result = await runCopyAgent(ctxBase(), agentInput);
@@ -503,6 +599,9 @@ export function createImprovementPrPipelineRunner(
         placementSignals: placementSignalsFromCreativeContext(creativeContext),
       };
       const target = creativeContext?.target;
+      const performanceNotes = input.performanceDigest
+        ? creativePerformanceGeneInsightLines(input.performanceDigest)
+        : [];
       const agentInput: ImagePromptAgentInput = {
         accountId: input.accountId,
         audienceSummary: input.audienceFocus,
@@ -522,7 +621,7 @@ export function createImprovementPrPipelineRunner(
             input.strategy.audienceFocus,
           ].filter(Boolean).join(" / "),
           rationale: input.strategy.rationale,
-          notes: creativeContext?.notes ?? [],
+          notes: [...(creativeContext?.notes ?? []), ...performanceNotes],
         },
         ...(target
           ? {
@@ -540,16 +639,24 @@ export function createImprovementPrPipelineRunner(
           : {}),
         ...(creativeContext
           ? {
-              referenceCreatives: creativeContext.references.map((r) => ({
-                hierarchy: r.hierarchy,
-                nodeKey: r.nodeKey,
-                displayName: r.displayName,
-                current: metricsToRecord(r.current),
-                rationale: r.rationale,
-                creative: sanitizeCreativeForPrompt(r.creative ?? null),
-              })),
+              referenceCreatives: [
+                ...creativeContext.references.map((r) => ({
+                  hierarchy: r.hierarchy,
+                  nodeKey: r.nodeKey,
+                  displayName: r.displayName,
+                  current: metricsToRecord(r.current),
+                  rationale: r.rationale,
+                  creative: sanitizeCreativeForPrompt(r.creative ?? null),
+                })),
+                ...referenceCreativesFromDigest(input.performanceDigest ?? null),
+              ],
               creativeStrategy: creativeContext.strategy,
             }
+          : input.performanceDigest
+            ? {
+                referenceCreatives: referenceCreativesFromDigest(input.performanceDigest),
+                creativeStrategy: "scale_winner" as const,
+              }
           : {}),
         variantCount: 3,
         dimensionPresets: IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS,
@@ -779,6 +886,68 @@ function failedAiRun(args: FailedAiRunArgs): {
     finishedAt: startedAt,
   });
   return { aiRunInput, output: null, error: message };
+}
+
+function copyPerformanceContext(
+  digest: CreativePerformanceDigest
+): NonNullable<CopyAgentInput["performanceContext"]> {
+  return {
+    winningExamples: digest.winners
+      .filter((entry) => entry.headline && entry.primaryText)
+      .slice(0, 3)
+      .map((entry) => {
+        const genes = creativePerformanceExampleGenes(entry.genes);
+        return {
+          headline: entry.headline!,
+          primaryText: entry.primaryText!,
+          ...(genes ? { genes } : {}),
+          ...(entry.metrics.ctr !== null ? { ctr: entry.metrics.ctr } : {}),
+        };
+      }),
+    losingExamples: digest.losers
+      .filter((entry) => entry.headline && entry.primaryText)
+      .slice(0, 3)
+      .map((entry) => {
+        const genes = creativePerformanceExampleGenes(entry.genes);
+        return {
+          headline: entry.headline!,
+          primaryText: entry.primaryText!,
+          ...(genes ? { genes } : {}),
+        };
+      }),
+    geneInsights: creativePerformanceGeneInsightLines(digest),
+  };
+}
+
+function referenceCreativesFromDigest(
+  digest: CreativePerformanceDigest | null
+): NonNullable<ImagePromptAgentInput["referenceCreatives"]> {
+  if (!digest) return [];
+  return digest.winners.slice(0, 3).map((entry) => ({
+    hierarchy: "ad" as const,
+    nodeKey: entry.creativeKey,
+    displayName: entry.displayName,
+    current: {
+      impressions: entry.metrics.impressions,
+      clicks: entry.metrics.clicks,
+      conversions: entry.metrics.conversions,
+      spend: entry.metrics.spendMajor,
+      ...(entry.metrics.ctr !== null ? { ctr: entry.metrics.ctr } : {}),
+      ...(entry.metrics.cpaMajor !== null ? { cpa: entry.metrics.cpaMajor } : {}),
+    },
+    rationale: [
+      `creative performance verdict=${entry.verdict}`,
+      creativePerformanceExampleGenes(entry.genes),
+    ].filter(Boolean).join(" / "),
+    creative: {
+      key: entry.creativeKey,
+      displayName: entry.displayName,
+      headline: entry.headline,
+      primaryText: entry.primaryText,
+      callToAction: null,
+      linkUrl: null,
+    },
+  }));
 }
 
 function metricsToRecord(

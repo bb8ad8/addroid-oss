@@ -209,6 +209,19 @@ export {
 } from "./metrics.js";
 
 export {
+  buildCreativePerformanceDigest,
+  creativePerformanceExampleGenes,
+  creativePerformanceGeneInsightLines,
+  type CreativePerformanceCreativeRow,
+  type CreativePerformanceDigest,
+  type CreativePerformanceEntry,
+  type CreativePerformanceHierarchyRow,
+  type CreativePerformanceJoinedRow,
+  type CreativePerformanceSnapshotRow,
+  type CreativePerformanceStore,
+} from "./creative-performance.js";
+
+export {
   DEFAULT_ANOMALY_Z_THRESHOLD,
   DEFAULT_PROPORTION_ALPHA,
   DEFAULT_PROPORTION_MIN_SUCCESSES,
