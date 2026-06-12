@@ -66,6 +66,9 @@ coverage/
 # Local assistant scratch files
 /.claude/
 
+# Local implementation goal docs (not part of the public OSS repo)
+/docs/goals/
+
 # OS / editor
 .DS_Store
 Thumbs.db
