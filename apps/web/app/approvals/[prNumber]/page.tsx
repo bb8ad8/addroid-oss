@@ -19,6 +19,8 @@ import { CodeBlock, InlineCode } from "../../../components/ui/CodeBlock";
 import { MergePrButton } from "./MergePrButton";
 import { formatDateTime, resolveDisplayTimeZone } from "../../../lib/datetime";
 import { ensureWebWorkspace } from "../../../lib/github-runtime";
+import { CreativePreview } from "../../../components/creative-preview/CreativePreview";
+import { buildCreativePreviewProps } from "../../../lib/creative-preview-data";
 
 export const dynamic = "force-dynamic";
 
@@ -350,6 +352,35 @@ export default async function ApprovalDetailPage({ params }: PageParams) {
           },
         })
       : [];
+  const creativePreviewRows = await prisma.creative
+    .findMany({
+      where: {
+        pullRequestId: pr.id,
+        account: { workspaceId: workspace.id },
+      },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        displayName: true,
+        mediaType: true,
+        spec: true,
+        storageRef: true,
+        account: {
+          select: {
+            key: true,
+            displayName: true,
+          },
+        },
+      },
+    })
+    .catch(() => []);
+  const creativePreviews = await Promise.all(
+    creativePreviewRows.map(async (creative) => ({
+      id: creative.id,
+      displayName: creative.displayName,
+      props: await buildCreativePreviewProps(creative),
+    })),
+  );
 
   const canMerge =
     pr.state === "open" &&
@@ -675,6 +706,35 @@ export default async function ApprovalDetailPage({ params }: PageParams) {
                   ]}
                 />
               </section>
+            </div>
+          )}
+        </Panel>
+
+        <Panel
+          title="クリエイティブプレビュー"
+          subtitle="PR に添付された生成クリエイティブの配信面モック"
+          status={
+            <StatusDot state={creativePreviews.length > 0 ? "info" : "idle"}>
+              {creativePreviews.length > 0 ? `${creativePreviews.length} 件` : "なし"}
+            </StatusDot>
+          }
+        >
+          {creativePreviews.length === 0 ? (
+            <EmptyState
+              title="この PR に紐付くクリエイティブはありません。"
+              description="クリエイティブ入稿PRの場合は、生成クリエイティブの Feed / Stories プレビューがここに表示されます。"
+            />
+          ) : (
+            <div className="approval-creative-previews">
+              {creativePreviews.map((creative) => (
+                <section className="approval-creative-preview" key={creative.id}>
+                  <div className="approval-creative-preview__header">
+                    <InlineCode>{creative.id}</InlineCode>
+                    <span>{creative.displayName}</span>
+                  </div>
+                  <CreativePreview {...creative.props} />
+                </section>
+              ))}
             </div>
           )}
         </Panel>

@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 配信面プレビュー
+
+- `/creatives/[id]` と `/approvals/[prNumber]` に Feed / Stories / Carousel のHTMLモックフレーム型クリエイティブプレビューを追加。
+
 ### Added — カルーセル反映 (Phase 2)
 
 - GitOps apply が carousel creative operation を検証し、card image を `adimages` に順次 upload して `child_attachments` 付き adcreative と PAUSED ad を作成できる Phase 2 経路を追加。

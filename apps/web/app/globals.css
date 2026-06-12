@@ -4,6 +4,7 @@
  */
 
 @import "../../../design/tokens.css";
+@import "../components/creative-preview/placement-frames.css";
 
 *,
 *::before,
@@ -2090,6 +2091,27 @@ button {
 .creative-detail__preview-caption .mono {
   font-family: var(--font-mono);
   font-size: 0.75rem;
+}
+
+.approval-creative-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(375px, max-content));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.approval-creative-preview {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.approval-creative-preview__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: var(--size-sm);
 }
 
 .qa-asset summary::-webkit-details-marker {

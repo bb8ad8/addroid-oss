@@ -42,7 +42,7 @@
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -82,6 +82,8 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const FIXTURE_PR_NUMBER = 7_777_777;
 const FIXTURE_REPO_OWNER = "addroid-test";
 const FIXTURE_REPO_NAME = "addroid-browser-fixture";
+const FIXTURE_CREATIVE_ID = "browser-preview-creative";
+const FIXTURE_ACCOUNT_KEY = "browser-preview";
 
 // SideNav が描画する全リンク先。これらは layout 経由で全ページに含まれる
 // はずなので、欠けていれば「nav が壊れている」と判定する。
@@ -204,7 +206,7 @@ const SCENARIOS = [
       "安全設定",
       "外部からの着信を使わない",
       "Slack 連携 (任意)",
-      "AdDroid は Slack なしでも",
+      "Slack 側でアプリを作り",
       "OPTIONAL",
     ],
   },
@@ -315,6 +317,38 @@ async function waitForServer(baseUrl, deadlineMs) {
     await delay(1_000);
   }
   return false;
+}
+
+function resolveBrowserTestStoragePath(key) {
+  const root = path.join(
+    process.env.ADDROID_HOME?.trim()
+      ? path.resolve(process.env.ADDROID_HOME.trim())
+      : path.join(process.env.HOME ?? process.cwd(), ".addroid"),
+    "storage",
+  );
+  const normalized = path.posix.normalize(String(key).replace(/\\/g, "/"));
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.includes("/../") ||
+    normalized.endsWith("/..")
+  ) {
+    throw new Error(`invalid browser-test storage key: ${key}`);
+  }
+  const abs = path.resolve(root, normalized);
+  const rel = path.relative(root, abs);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`browser-test storage key escapes root: ${key}`);
+  }
+  return abs;
+}
+
+function writeBrowserTestStorage(key, data) {
+  const abs = resolveBrowserTestStoragePath(key);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  writeFileSync(abs, data, { mode: 0o600 });
 }
 
 function startServer() {
@@ -841,7 +875,117 @@ async function seedPrFixture(prisma) {
       previewUpdatedAt: new Date(),
     },
   });
-  return { repo, pr, workspaceId: workspace.id, previousOpsRepoId: workspace.opsRepoId };
+  const account = await prisma.adAccount.upsert({
+    where: {
+      workspaceId_key: { workspaceId: workspace.id, key: FIXTURE_ACCOUNT_KEY },
+    },
+    create: {
+      workspaceId: workspace.id,
+      key: FIXTURE_ACCOUNT_KEY,
+      displayName: "Browser Preview Account",
+      metaAccountId: "act_browser_preview",
+      currency: "JPY",
+      timezoneName: "Asia/Tokyo",
+    },
+    update: {
+      displayName: "Browser Preview Account",
+      active: true,
+    },
+  });
+  const baseKey = `creatives/${FIXTURE_ACCOUNT_KEY}/${FIXTURE_CREATIVE_ID}`;
+  const assetKey = `${baseKey}/asset_square.png`;
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64",
+  );
+  writeBrowserTestStorage(assetKey, png);
+  writeBrowserTestStorage(
+    `${baseKey}/metadata.json`,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        creativeId: FIXTURE_CREATIVE_ID,
+        accountKey: FIXTURE_ACCOUNT_KEY,
+        storageRef: `storage://${baseKey}`,
+        createdAt: new Date().toISOString(),
+        provider: "mock",
+        model: "browser-test",
+        prompt: "browser preview fixture",
+        generatedAt: new Date().toISOString(),
+        requestId: null,
+        variantCount: 1,
+        parameters: {
+          purpose: "browser-test",
+          variationConditions: [
+            { width: 1080, height: 1080, format: "png", variantKey: "square" },
+          ],
+        },
+        costUsd: 0,
+        assets: [
+          {
+            variantKey: "square",
+            assetId: "asset_aaaaaaaaaaaa",
+            filename: "asset_square.png",
+            storageRef: `storage://${assetKey}`,
+            mimeType: "image/png",
+            width: 1080,
+            height: 1080,
+            byteSize: png.byteLength,
+            qaOverall: "qa_passed",
+          },
+        ],
+        qa: {
+          overall: "qa_passed",
+          passingCount: 1,
+          failingCount: 0,
+          assets: [],
+        },
+        links: { pullRequestNumber: FIXTURE_PR_NUMBER },
+      },
+      null,
+      2,
+    ),
+  );
+  await prisma.creative.upsert({
+    where: {
+      accountId_key: { accountId: account.id, key: FIXTURE_CREATIVE_ID },
+    },
+    create: {
+      id: FIXTURE_CREATIVE_ID,
+      accountId: account.id,
+      pullRequestId: pr.id,
+      key: FIXTURE_CREATIVE_ID,
+      displayName: "Browser Preview Creative",
+      mediaType: "image",
+      status: "qa_passed",
+      provider: "mock",
+      model: "browser-test",
+      parameters: {
+        purpose: "browser-test",
+        variationConditions: [
+          { width: 1080, height: 1080, format: "png", variantKey: "square" },
+        ],
+      },
+      storagePath: assetKey,
+      storageRef: `storage://${baseKey}`,
+      spec: {},
+    },
+    update: {
+      pullRequestId: pr.id,
+      status: "qa_passed",
+      storagePath: assetKey,
+      storageRef: `storage://${baseKey}`,
+      spec: {},
+    },
+  });
+  return {
+    repo,
+    pr,
+    workspaceId: workspace.id,
+    previousOpsRepoId: workspace.opsRepoId,
+    accountId: account.id,
+    creativeId: FIXTURE_CREATIVE_ID,
+  };
 }
 
 async function cleanupPrFixture(prisma, fixture = null) {
@@ -867,6 +1011,11 @@ async function cleanupPrFixture(prisma, fixture = null) {
   }
   await prisma.githubPullRequest
     .deleteMany({ where: { repoId: repo.id } })
+    .catch(() => undefined);
+  await prisma.adAccount
+    .deleteMany({
+      where: { key: FIXTURE_ACCOUNT_KEY },
+    })
     .catch(() => undefined);
   await prisma.githubRepo
     .delete({ where: { id: repo.id } })
@@ -970,7 +1119,52 @@ async function browserFlowApprovals(page, recordResult) {
   recordResult("browser-approvals-detail-renders-file-path-b", detailRender.hasFixturePathB, "fixture path config/fixture-new.yaml が描画されていません");
   recordResult("browser-approvals-detail-renders-merge-button", detailRender.hasMergeButton, "Web UI Merge ボタンが描画されていません");
 
+  const approvalPreview = await page.eval(`
+    ${HELPER_FNS}
+    const text = document.body.innerText || "";
+    const preview = document.querySelector("[data-testid='creative-preview']");
+    const stories = Array.from(document.querySelectorAll("button"))
+      .find((button) => (button.textContent || "").trim() === "Stories");
+    if (stories) stories.click();
+    return {
+      hasSection: text.includes("クリエイティブプレビュー"),
+      hasPreview: !!preview,
+      hasProxyImage: Array.from(document.querySelectorAll("img"))
+        .some((img) => (img.getAttribute("src") || "").startsWith("/api/creatives/")),
+      storiesSelected: stories?.getAttribute("aria-selected") === "true",
+      hasCropNote: (document.body.innerText || "").includes("この範囲は表示されません"),
+      hasPlaceholderCopy: (document.body.innerText || "").includes("(見出し未設定)") &&
+        (document.body.innerText || "").includes("(本文未設定)"),
+    };
+  `);
+  recordResult("browser-approvals-detail-renders-creative-preview-section", approvalPreview.hasSection, "承認詳細にクリエイティブプレビュー section がありません");
+  recordResult("browser-approvals-detail-renders-creative-preview", approvalPreview.hasPreview, "承認詳細に CreativePreview が描画されていません");
+  recordResult("browser-approvals-preview-uses-proxy-image", approvalPreview.hasProxyImage, "プレビュー画像が /api/creatives proxy 経由ではありません");
+  recordResult("browser-approvals-preview-stories-tab-switches", approvalPreview.storiesSelected, "Stories タブ切替が動いていません");
+  recordResult("browser-approvals-preview-shows-crop-note", approvalPreview.hasCropNote, "Stories の切れ領域注記が表示されていません");
+  recordResult("browser-approvals-preview-placeholder-copy", approvalPreview.hasPlaceholderCopy, "copy 無し creative の placeholder が表示されていません");
+
+  await page.navigate(`${page.baseUrl}/creatives/${FIXTURE_CREATIVE_ID}`);
+  const creativeDetailPreview = await page.eval(`
+    ${HELPER_FNS}
+    const text = document.body.innerText || "";
+    const stories = Array.from(document.querySelectorAll("button"))
+      .find((button) => (button.textContent || "").trim() === "Stories");
+    if (stories) stories.click();
+    return {
+      hasFrame: !!document.querySelector("[data-testid='creative-preview']"),
+      storiesSelected: stories?.getAttribute("aria-selected") === "true",
+      hasCropNote: (document.body.innerText || "").includes("この範囲は表示されません"),
+      hasPlaceholderCopy: text.includes("(見出し未設定)") && text.includes("(本文未設定)"),
+    };
+  `);
+  recordResult("browser-creatives-detail-renders-placement-preview", creativeDetailPreview.hasFrame, "/creatives/[id] に CreativePreview が描画されていません");
+  recordResult("browser-creatives-detail-stories-tab-switches", creativeDetailPreview.storiesSelected, "/creatives/[id] の Stories タブ切替が動いていません");
+  recordResult("browser-creatives-detail-shows-crop-note", creativeDetailPreview.hasCropNote, "/creatives/[id] の Stories 切れ領域注記が表示されていません");
+  recordResult("browser-creatives-detail-placeholder-copy", creativeDetailPreview.hasPlaceholderCopy, "/creatives/[id] の copy placeholder が表示されていません");
+
   // 3) Web UI Merge ボタンをクリックして ConfirmDialog を開き、確定 → エラー Toast。
+  await page.navigate(`${page.baseUrl}/approvals/${FIXTURE_PR_NUMBER}`);
   if (detailRender.hasMergeButton) {
     await page.eval(`
       ${HELPER_FNS}

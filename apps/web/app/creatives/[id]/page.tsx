@@ -59,6 +59,8 @@ import {
 } from "../../../lib/meta-runtime";
 import { getPaginationState, paginationLabel } from "../../../lib/pagination";
 import { DashboardChatPanel } from "../../DashboardChatPanel";
+import { CreativePreview } from "../../../components/creative-preview/CreativePreview";
+import { buildCreativePreviewPropsFromMetadata } from "../../../lib/creative-preview-data";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +188,7 @@ export default async function CreativeDetailPage({
   const metadata: CreativeMetadataDocument | null = row.storageRef
     ? await readCreativeMetadataByRef(row.storageRef)
     : null;
+  const placementPreview = buildCreativePreviewPropsFromMetadata(row, metadata);
 
   // 関連 audit_logs (target = "creative:<id>") を引く。
   let auditRows: Array<{
@@ -378,6 +381,20 @@ export default async function CreativeDetailPage({
       />
 
       <div className="page-body page-body--single">
+        <Panel
+          title="配信面プレビュー"
+          subtitle="Feed / Stories 上での見え方をHTMLフレームで確認します"
+          status={
+            <StatusDot state={placementPreview.assets.length > 0 ? "ok" : "idle"}>
+              {placementPreview.assets.length > 0
+                ? `${placementPreview.assets.length} asset`
+                : "画像なし"}
+            </StatusDot>
+          }
+        >
+          <CreativePreview {...placementPreview} />
+        </Panel>
+
         <Panel
           title="Preview"
           subtitle={
