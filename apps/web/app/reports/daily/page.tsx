@@ -10,6 +10,7 @@
 // 明示的な空状態 UI を出す。
 
 import Link from "next/link";
+import { wilsonInterval } from "@addroid/queue";
 import { prisma } from "../../../lib/prisma";
 import { Panel } from "../../../components/ui/Panel";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -61,12 +62,26 @@ interface DailyReportSummary {
   current: KpiSet;
   prior: KpiSet;
   deltas: Record<string, string>;
+  statisticalContext: StatisticalContext;
   snapshotIds: string[];
   aiCommentary: string | null;
   topImprovements: ImprovementCandidate[];
   aiRunId: string | null;
   errorMessage?: string;
   mode: string;
+}
+
+interface StatisticalComparison {
+  metric: string;
+  verdict: string;
+  pApprox: number | null;
+  relativeChange: number | null;
+  minTrialsMet: boolean;
+}
+
+interface StatisticalContext {
+  comparisons: StatisticalComparison[];
+  confidence: "reliable" | "indicative" | "insufficient";
 }
 
 interface CronRunRow {
@@ -181,6 +196,7 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
           expectedImpact: readString(row.expectedImpact),
         }))
     : [];
+  const statisticalContext = parseStatisticalContext(output.statisticalContext);
   return {
     status: output.status,
     workspaceId: output.workspaceId,
@@ -194,6 +210,7 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
     current: readKpi(output.current),
     prior: readKpi(output.prior),
     deltas,
+    statisticalContext,
     snapshotIds,
     aiCommentary:
       typeof output.aiCommentary === "string" ? output.aiCommentary : null,
@@ -204,6 +221,26 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
       : {}),
     mode: readString(output.mode, "report_only"),
   };
+}
+
+function parseStatisticalContext(value: unknown): StatisticalContext {
+  if (!isRecord(value)) return { comparisons: [], confidence: "insufficient" };
+  const confidence =
+    value.confidence === "reliable" ||
+    value.confidence === "indicative" ||
+    value.confidence === "insufficient"
+      ? value.confidence
+      : "insufficient";
+  const comparisons = Array.isArray(value.comparisons)
+    ? value.comparisons.filter(isRecord).map((row) => ({
+        metric: readString(row.metric),
+        verdict: readString(row.verdict, "insufficient_data"),
+        pApprox: readNullableNumber(row.pApprox),
+        relativeChange: readNullableNumber(row.relativeChange),
+        minTrialsMet: row.minTrialsMet === true,
+      }))
+    : [];
+  return { comparisons, confidence };
 }
 
 function parseDailyReportSummaries(output: unknown): DailyReportSummary[] {
@@ -355,6 +392,20 @@ function formatDelta(value: string | undefined): string {
   return value && value.length > 0 ? value : "—";
 }
 
+function formatRate(n: number | null): string {
+  return n === null ? "—" : formatPercent(n * 100);
+}
+
+function cvr(k: KpiSet): number | null {
+  return k.clicks > 0 ? k.conversions / k.clicks : null;
+}
+
+function formatWilson(successes: number, trials: number): string {
+  const ci = wilsonInterval(successes, trials);
+  if (ci.lower === null || ci.upper === null) return "95% CI —";
+  return `95% CI ${formatPercent(ci.lower * 100)}–${formatPercent(ci.upper * 100)}`;
+}
+
 interface KpiCellProps {
   label: string;
   value: string;
@@ -398,12 +449,13 @@ function KpiCell({ label, value, delta, hint }: KpiCellProps) {
   );
 }
 
-function reportKpiRows(currency: string | null): {
+function reportKpiRows(summary: DailyReportSummary): {
   label: string;
   valueOf: (k: KpiSet) => string;
   deltaKey: string;
   hint?: string;
 }[] {
+  const currency = summary.currency;
   return [
     {
       label: "Spend",
@@ -412,7 +464,18 @@ function reportKpiRows(currency: string | null): {
     },
     { label: "Impressions", valueOf: (k) => formatNumber(k.impressions), deltaKey: "impressions" },
     { label: "Clicks", valueOf: (k) => formatNumber(k.clicks), deltaKey: "clicks" },
-    { label: "CTR", valueOf: (k) => formatPercent(k.ctr), deltaKey: "ctr" },
+    {
+      label: "CTR",
+      valueOf: (k) => formatPercent(k.ctr),
+      deltaKey: "ctr",
+      hint: formatWilson(summary.current.clicks, summary.current.impressions),
+    },
+    {
+      label: "CVR",
+      valueOf: (k) => formatRate(cvr(k)),
+      deltaKey: "cvr",
+      hint: formatWilson(summary.current.conversions, summary.current.clicks),
+    },
     {
       label: "CPC",
       valueOf: (k) => formatCurrency(k.cpc, currency),
@@ -431,6 +494,50 @@ function reportKpiRows(currency: string | null): {
     },
     { label: "Frequency", valueOf: (k) => formatFrequency(k.frequency), deltaKey: "frequency" },
   ];
+}
+
+function comparisonBadgeState(verdict: string): StatusState {
+  switch (verdict) {
+    case "significant_increase":
+      return "ok";
+    case "significant_decrease":
+      return "warn";
+    case "insufficient_data":
+      return "warn";
+    case "not_significant":
+    default:
+      return "idle";
+  }
+}
+
+function comparisonBadgeLabel(comparison: StatisticalComparison): string {
+  const metric = comparison.metric.toUpperCase();
+  switch (comparison.verdict) {
+    case "significant_increase":
+      return `${metric}: 有意な増加`;
+    case "significant_decrease":
+      return `${metric}: 有意な低下`;
+    case "not_significant":
+      return `${metric}: 有意差なし`;
+    case "insufficient_data":
+    default:
+      return `${metric}: 参考値 (サンプル不足)`;
+  }
+}
+
+function confidenceBadge(summary: DailyReportSummary) {
+  const labels: Record<StatisticalContext["confidence"], string> = {
+    reliable: "統計信頼度: 高",
+    indicative: "統計信頼度: 参考",
+    insufficient: "統計信頼度: サンプル不足",
+  };
+  const state: Record<StatisticalContext["confidence"], StatusState> = {
+    reliable: "ok",
+    indicative: "info",
+    insufficient: "warn",
+  };
+  const confidence = summary.statisticalContext.confidence;
+  return <StatusBadge state={state[confidence]}>{labels[confidence]}</StatusBadge>;
 }
 
 function summaryItems(summary: DailyReportSummary, displayTimeZone: string): KeyValueEntry[] {
@@ -502,7 +609,7 @@ function DailyReportDetail({
   summary: DailyReportSummary;
   displayTimeZone: string;
 }) {
-  const kpiRows = reportKpiRows(summary.currency);
+  const kpiRows = reportKpiRows(summary);
   return (
     <div style={{ display: "grid", gap: "1.25rem" }}>
       <KeyValueList items={summaryItems(summary, displayTimeZone)} />
@@ -522,6 +629,18 @@ function DailyReportDetail({
             delta={formatDelta(summary.deltas[kpi.deltaKey])}
             {...(kpi.hint ? { hint: kpi.hint } : {})}
           />
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        {confidenceBadge(summary)}
+        {summary.statisticalContext.comparisons.map((comparison) => (
+          <StatusBadge
+            key={`${comparison.metric}:${comparison.verdict}`}
+            state={comparisonBadgeState(comparison.verdict)}
+          >
+            {comparisonBadgeLabel(comparison)}
+          </StatusBadge>
         ))}
       </div>
 

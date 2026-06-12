@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   computeKpiDeltas,
+  buildStatisticalContext,
   microsToMajor,
   resolveDailyReportTimeZone,
   runDailyReportOnce,
@@ -219,6 +220,29 @@ test("computeKpiDeltas formats +/- percent text and handles zeros", () => {
   assert.equal(z.clicks, "0%");
 });
 
+test("buildStatisticalContext compares CTR/CVR and labels confidence", () => {
+  const prior = toKpiSet(
+    makeRow("account", "act_111", {
+      impressions: 5000,
+      clicks: 50,
+      conversions: 5,
+    })
+  );
+  const current = toKpiSet(
+    makeRow("account", "act_111", {
+      impressions: 5000,
+      clicks: 100,
+      conversions: 30,
+    })
+  );
+  const context = buildStatisticalContext(current, prior);
+  assert.equal(context.confidence, "reliable");
+  assert.equal(context.comparisons.length, 2);
+  assert.equal(context.comparisons[0]!.metric, "ctr");
+  assert.equal(context.comparisons[0]!.verdict, "significant_increase");
+  assert.equal(context.comparisons[1]!.metric, "cvr");
+});
+
 test("subtractOneUtcDay handles month/year rollovers", () => {
   assert.equal(subtractOneUtcDay("2026-05-02"), "2026-05-01");
   assert.equal(subtractOneUtcDay("2026-05-01"), "2026-04-30");
@@ -417,6 +441,9 @@ test("runDailyReportOnce stores 4-level snapshots and emits AI commentary + top 
   assert.equal(analystCall.current.cpa, 200);
   assert.equal(analystCall.current.frequency, 1.5);
   assert.equal(analystCall.current.cpm, 90.909091);
+  assert.equal(summary.statisticalContext.comparisons.length, 2);
+  assert.equal(analystCall.statisticalContext?.comparisons.length, 2);
+  assert.equal(analystCall.statisticalContext?.confidence, "indicative");
   // top improvements truncated to <= 3 (we returned 1)
   assert.equal(summary.topImprovements.length, 1);
   assert.equal(summary.topImprovements[0]!.target, "cmp_1");

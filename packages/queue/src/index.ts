@@ -192,10 +192,13 @@ export {
   type DailyReportNodeType,
   type DailyReportRunStatus,
   type DailyReportSnapshotStore,
+  type DailyReportStatisticalComparison,
+  type DailyReportStatisticalContext,
   type DailyReportSummary,
   type PerformanceSnapshotUpsertInput,
   type PerformanceSnapshotUpsertResult,
   type RunDailyReportOptions,
+  buildStatisticalContext,
 } from "./daily-report.js";
 
 export {
@@ -204,6 +207,26 @@ export {
   type DerivedMetrics,
   type SnapshotMetricInput,
 } from "./metrics.js";
+
+export {
+  DEFAULT_ANOMALY_Z_THRESHOLD,
+  DEFAULT_PROPORTION_ALPHA,
+  DEFAULT_PROPORTION_MIN_SUCCESSES,
+  DEFAULT_PROPORTION_MIN_TRIALS,
+  DEFAULT_WILSON_Z,
+  INDICATIVE_MIN_CONVERSIONS,
+  INDICATIVE_MIN_IMPRESSIONS,
+  RELIABLE_MIN_CONVERSIONS,
+  RELIABLE_MIN_IMPRESSIONS,
+  compareProportions,
+  confidenceLabel,
+  scoreAnomaly,
+  wilsonInterval,
+  type AnomalyScore,
+  type ConfidenceLabel,
+  type ProportionCI,
+  type ProportionComparison,
+} from "./stats.js";
 
 export {
   combineApprovalClassifications,

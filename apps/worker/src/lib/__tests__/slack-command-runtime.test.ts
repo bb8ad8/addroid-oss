@@ -194,6 +194,10 @@ function buildDailyReportSummary(
       frequency: null,
     },
     deltas: {},
+    statisticalContext: {
+      comparisons: [],
+      confidence: "insufficient",
+    },
     snapshotIds: [],
     aiCommentary: status === "succeeded" ? `commentary for ${accountKey}` : null,
     topImprovements: [],

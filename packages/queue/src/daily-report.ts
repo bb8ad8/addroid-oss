@@ -35,6 +35,12 @@ import {
   type BreakdownsPolicy,
 } from "./analytics.js";
 import { deriveMetrics } from "./metrics.js";
+import {
+  compareProportions,
+  confidenceLabel,
+  type ConfidenceLabel,
+  type ProportionComparison,
+} from "./stats.js";
 
 // ---------------------------------------------------------------------
 // Insights provider — Meta CLI / Mock / Fixture が満たす境界
@@ -210,6 +216,7 @@ export interface DailyReportAnalystInput {
     cpm?: number;
     qualityRankingSummary?: string;
   };
+  statisticalContext?: DailyReportStatisticalContext;
   snapshotIds: string[];
 }
 
@@ -300,6 +307,19 @@ export interface DailyReportImprovementCandidate {
   expectedImpact: string;
 }
 
+export interface DailyReportStatisticalComparison {
+  metric: "ctr" | "cvr";
+  verdict: ProportionComparison["verdict"];
+  pApprox: number | null;
+  relativeChange: number | null;
+  minTrialsMet: boolean;
+}
+
+export interface DailyReportStatisticalContext {
+  comparisons: DailyReportStatisticalComparison[];
+  confidence: ConfidenceLabel;
+}
+
 export interface DailyReportSummary {
   status: DailyReportRunStatus;
   workspaceId: string;
@@ -318,6 +338,8 @@ export interface DailyReportSummary {
   prior: DailyReportKpiSet;
   /** UI 表示用 (`+12.3%` / `-4.5%`)。 */
   deltas: Record<string, string>;
+  /** CTR/CVR の統計的比較とサンプル信頼ラベル。 */
+  statisticalContext: DailyReportStatisticalContext;
   /** 永続化された snapshot id 一覧 (4 階層)。 */
   snapshotIds: string[];
   /** AI コメント (analyst agent succeeded のみ非 null)。 */
@@ -384,6 +406,7 @@ export async function runDailyReportOnce(
       current: ZERO_KPIS,
       prior: ZERO_KPIS,
       deltas: {},
+      statisticalContext: buildStatisticalContext(ZERO_KPIS, ZERO_KPIS),
       snapshotIds: [],
       aiCommentary: null,
       topImprovements: [],
@@ -465,6 +488,7 @@ export async function runDailyReportOnce(
   const current = currentSelection.kpis;
   const prior = priorSelection.kpis;
   const deltas = computeKpiDeltas(current, prior);
+  const statisticalContext = buildStatisticalContext(current, prior);
 
   if (insights.current.length === 0) {
     return {
@@ -480,6 +504,7 @@ export async function runDailyReportOnce(
       current,
       prior,
       deltas,
+      statisticalContext,
       snapshotIds,
       aiCommentary: null,
       topImprovements: [],
@@ -496,6 +521,7 @@ export async function runDailyReportOnce(
     priorPeriodStart: priorMetricDate,
     priorPeriodEnd: priorMetricDate,
     current: kpiSetToAnalystMetrics(current),
+    statisticalContext,
     snapshotIds,
   };
   if (priorSelection.source !== "none") {
@@ -519,6 +545,7 @@ export async function runDailyReportOnce(
       current,
       prior,
       deltas,
+      statisticalContext,
       snapshotIds,
       aiCommentary: null,
       topImprovements: [],
@@ -551,11 +578,37 @@ export async function runDailyReportOnce(
     current,
     prior,
     deltas: mergedDeltas,
+    statisticalContext,
     snapshotIds,
     aiCommentary: analystResult.output.commentary,
     topImprovements: top,
     aiRunId: aiRunRow.id,
     mode: opts.mode,
+  };
+}
+
+export function buildStatisticalContext(
+  current: DailyReportKpiSet,
+  prior: DailyReportKpiSet
+): DailyReportStatisticalContext {
+  return {
+    comparisons: [
+      {
+        metric: "ctr",
+        ...compareProportions(
+          { successes: prior.clicks, trials: prior.impressions },
+          { successes: current.clicks, trials: current.impressions }
+        ),
+      },
+      {
+        metric: "cvr",
+        ...compareProportions(
+          { successes: prior.conversions, trials: prior.clicks },
+          { successes: current.conversions, trials: current.clicks }
+        ),
+      },
+    ],
+    confidence: confidenceLabel(current.conversions, current.impressions),
   };
 }
 

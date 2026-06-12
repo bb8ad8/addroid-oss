@@ -1069,6 +1069,18 @@ export interface AnalystAgentInput {
   priorPeriodEnd?: string;
   current: AnalystAgentMetrics;
   prior?: AnalystAgentMetrics;
+  statisticalContext?: {
+    comparisons: Array<{
+      metric: string;
+      verdict:
+        | "significant_increase"
+        | "significant_decrease"
+        | "not_significant"
+        | "insufficient_data";
+      relativeChange: number | null;
+    }>;
+    confidence: "reliable" | "indicative" | "insufficient";
+  };
   /** 紐付く performance_snapshots の id 配列 (account/campaign/adset/ad)。 */
   snapshotIds: string[];
 }
@@ -1098,6 +1110,8 @@ export const ANALYST_AGENT_SYSTEM_PROMPT = [
   "You do not propose budget or targeting changes — that is the media_buyer agent's role.",
   "When frequency, reach, CPM, or quality ranking signals are present, use them to distinguish audience fatigue, delivery cost pressure, and creative quality issues.",
   "Treat ranking diagnostics as supporting evidence only; keep deterministic KPI math in the provided metrics.",
+  "When statisticalContext is present, do not describe not_significant or insufficient_data changes as proven improvements or declines.",
+  "If statisticalContext.confidence is insufficient, explicitly mention that sample size is too small for a firm conclusion.",
   "",
   "Respond with a single JSON object using exactly these fields:",
   "  commentary:       string (1 short paragraph, plain prose)",
