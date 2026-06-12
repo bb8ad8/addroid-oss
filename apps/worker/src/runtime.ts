@@ -20,6 +20,7 @@ import {
   resolveCronScheduleTimeZone,
   runDailyReportOnce,
   runBudgetGuardOnce,
+  runBudgetRebalanceOnce,
   runExecuteApply,
   runGithubPollOnce,
   runImprovementPrOnce,
@@ -31,6 +32,7 @@ import {
   type DailyReportInsightsProvider,
   type DailyReportSnapshotStore,
   type BudgetGuardSummary,
+  type BudgetRebalanceSummary,
   type ImprovementPrAuditWriter,
   type ImprovementPrExecutionMode,
   type ImprovementPrSummary,
@@ -90,6 +92,12 @@ import {
   createPrismaBudgetGuardStore,
   loadBudgetGuardPolicyForRoot,
 } from "./lib/budget-guard-runtime.js";
+import {
+  createBudgetRebalanceAuditWriter,
+  createBudgetRebalanceGithubPublisher,
+  createPrismaBudgetRebalanceStore,
+  loadBudgetRebalancePolicyForRoot,
+} from "./lib/budget-rebalance-runtime.js";
 import {
   createImprovementPrAuditWriter,
   createImprovementPrGithubPublisher,
@@ -343,6 +351,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
   // LLM Provider 経由で AI を呼び出す。runtime 側は store + agent runner を
   // factor out して、Slack command と各 cron handler から共有する。
   const budgetGuardStore = createPrismaBudgetGuardStore(prisma);
+  const budgetRebalanceStore = createPrismaBudgetRebalanceStore(prisma);
   const improvementPrStore = createPrismaImprovementPrStore(prisma);
 
   // Regression fix: 契約上の retention 要件
@@ -724,6 +733,144 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
                 cronStore,
                 handle,
                 `budget_guard had AI failures: ${errors.join("; ")}`
+              );
+            } else {
+              await finishCronRun(cronStore, handle, {
+                ...aggregate,
+                ...(summaries.length === 0
+                  ? { note: "no active ad_accounts in workspace" }
+                  : {}),
+              });
+            }
+          } else if (presetName === "budget_rebalance") {
+            const accounts = await prisma.adAccount.findMany({
+              where: { workspaceId: workspace.id, active: true },
+              select: {
+                id: true,
+                key: true,
+                displayName: true,
+                currency: true,
+                modeOverride: true,
+              },
+              orderBy: { key: "asc" },
+            });
+            const wsMode = await loadWorkspaceMode(prisma, workspace.id);
+            const policy = loadBudgetRebalancePolicyForRoot(opsRepoRootDir);
+            const publisher = createBudgetRebalanceGithubPublisher({
+              prisma,
+              adapter: getGithubAdapter(),
+              workspaceId: workspace.id,
+            });
+            const audit = createBudgetRebalanceAuditWriter({ prisma });
+            const wsForRepo = await prisma.workspace.findUnique({
+              where: { id: workspace.id },
+              select: { opsRepoId: true },
+            });
+            const repoRow = wsForRepo?.opsRepoId
+              ? await prisma.githubRepo.findUnique({
+                  where: { id: wsForRepo.opsRepoId },
+                  select: { owner: true, name: true, defaultBranch: true },
+                })
+              : null;
+            const repoSpec = repoRow ? `${repoRow.owner}/${repoRow.name}` : "";
+            const baseRef = repoRow?.defaultBranch ?? "main";
+            const summaries: BudgetRebalanceSummary[] = [];
+            const errors: string[] = [];
+            for (const acc of accounts) {
+              const effectiveMode = resolveExecutionMode(
+                wsMode,
+                acc.modeOverride
+              );
+              const summary = await adAccountLockProvider.withLock(
+                buildAdAccountLockKey({
+                  workspaceId: workspace.id,
+                  accountKey: acc.key,
+                }),
+                () =>
+                  runBudgetRebalanceOnce({
+                    workspaceId: workspace.id,
+                    mode: effectiveMode,
+                    accountKey: acc.key,
+                    policy,
+                    store: budgetRebalanceStore,
+                    publisher,
+                    audit,
+                    repo: repoSpec,
+                    baseRef,
+                    cronRunId: handle.cronRunId,
+                  })
+              );
+              summaries.push(summary);
+              const level: "info" | "warn" | "error" =
+                summary.status === "pr_failed"
+                  ? "error"
+                  : summary.status === "policy_missing" ||
+                      summary.status === "no_account"
+                    ? "warn"
+                    : "info";
+              await cronStore.recordExecutionLog({
+                cronRunId: handle.cronRunId,
+                workspaceId: workspace.id,
+                kind: "cron",
+                refType: "cron_run",
+                refId: handle.cronRunId,
+                level,
+                message:
+                  `budget_rebalance ${acc.key}: ${summary.status}` +
+                  (summary.pullRequest
+                    ? ` — PR #${summary.pullRequest.prNumber}`
+                    : summary.errorMessage
+                      ? ` — ${summary.errorMessage}`
+                      : ""),
+                payload: budgetRebalanceSummaryToPayload(summary),
+              });
+              if (summary.status === "pr_failed") {
+                errors.push(`${acc.key}: ${summary.errorMessage ?? "pr failed"}`);
+              }
+              if (
+                summary.status === "succeeded" &&
+                summary.pullRequest &&
+                repoRow
+              ) {
+                const webApprovalsUrl = buildWebUrl(
+                  webBaseUrl,
+                  `/approvals/${summary.pullRequest.prNumber}`
+                );
+                await sendSlackNotification({
+                  kind: "pr.opened",
+                  data: {
+                    prNumber: summary.pullRequest.prNumber,
+                    prTitle: `budget_rebalance (${acc.key})`,
+                    prUrl: summary.pullRequest.htmlUrl,
+                    repoFullName: repoSpec,
+                    workflow: "budget_rebalance",
+                    adAccountKey: acc.key,
+                    riskLabel: summary.classification ?? "requires_approval",
+                    ...(webApprovalsUrl ? { webApprovalsUrl } : {}),
+                  },
+                });
+              }
+            }
+            const aggregate = {
+              kind: "budget_rebalance",
+              status: errors.length > 0 ? "failed" : "succeeded",
+              accountsProcessed: summaries.length,
+              succeeded: summaries.filter((s) => s.status === "succeeded").length,
+              no_moves: summaries.filter((s) => s.status === "no_moves").length,
+              disabled: summaries.filter((s) => s.status === "disabled").length,
+              policy_missing: summaries.filter((s) => s.status === "policy_missing").length,
+              pr_failed: summaries.filter((s) => s.status === "pr_failed").length,
+              no_account: summaries.filter((s) => s.status === "no_account").length,
+              policyPath: opsRepoRootDir
+                ? "workflows/budget-rebalance.yaml"
+                : null,
+              accounts: summaries.map((s) => budgetRebalanceSummaryToPayload(s)),
+            };
+            if (errors.length > 0) {
+              await failCronRun(
+                cronStore,
+                handle,
+                `budget_rebalance had PR failures: ${errors.join("; ")}`
               );
             } else {
               await finishCronRun(cronStore, handle, {
@@ -1707,6 +1854,53 @@ function budgetGuardSummaryToPayload(summary: BudgetGuardSummary): JsonValue {
       observedValue: alert.observedValue,
       threshold: alert.threshold,
     })),
+  };
+  if (summary.errorMessage) payload.errorMessage = summary.errorMessage;
+  return payload;
+}
+
+/**
+ * budget_rebalance summary → execution_logs.payload / cron_runs.output accounts。
+ */
+function budgetRebalanceSummaryToPayload(summary: BudgetRebalanceSummary): JsonValue {
+  const payload: Record<string, JsonValue> = {
+    status: summary.status,
+    workspaceId: summary.workspaceId,
+    accountKey: summary.accountKey,
+    accountId: summary.accountId,
+    mode: summary.mode,
+    policyEnabled: summary.policyEnabled,
+    window: summary.window,
+    candidateCount: summary.candidateCount,
+    plan: summary.plan
+      ? {
+          totalDeltaMajor: summary.plan.totalDeltaMajor,
+          moves: summary.plan.moves.map((move) => ({
+            nodeKey: move.nodeKey,
+            displayName: move.displayName,
+            direction: move.direction,
+            fromMajor: move.fromMajor,
+            toMajor: move.toMajor,
+            deltaPercent: move.deltaPercent,
+            reason: move.reason,
+          })),
+          skipped: summary.plan.skipped.map((item) => ({
+            nodeKey: item.nodeKey,
+            reason: item.reason,
+          })),
+        }
+      : null,
+    pullRequest: summary.pullRequest
+      ? {
+          pullRequestId: summary.pullRequest.pullRequestId,
+          prNumber: summary.pullRequest.prNumber,
+          htmlUrl: summary.pullRequest.htmlUrl,
+          headSha: summary.pullRequest.headSha,
+        }
+      : null,
+    classification: summary.classification,
+    auditDecision: summary.auditDecision,
+    dangerousCategories: summary.dangerousCategories,
   };
   if (summary.errorMessage) payload.errorMessage = summary.errorMessage;
   return payload;

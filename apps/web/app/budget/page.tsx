@@ -93,6 +93,60 @@ interface BudgetGuardSummary {
   errorMessage?: string;
 }
 
+type BudgetRebalanceRunStatus =
+  | "succeeded"
+  | "no_account"
+  | "policy_missing"
+  | "disabled"
+  | "no_moves"
+  | "pr_failed";
+
+interface BudgetRebalanceMove {
+  accountKey: string;
+  nodeKey: string;
+  displayName: string;
+  direction: "increase" | "decrease";
+  fromMajor: number;
+  toMajor: number;
+  deltaPercent: number;
+  reason: string;
+}
+
+interface BudgetRebalanceSkipped {
+  accountKey: string;
+  nodeKey: string;
+  reason: string;
+}
+
+interface BudgetRebalancePullRequest {
+  prNumber: number;
+  htmlUrl: string;
+}
+
+interface BudgetRebalanceAccountSummary {
+  status: BudgetRebalanceRunStatus;
+  accountKey: string;
+  candidateCount: number;
+  policyEnabled: boolean | null;
+  window: { since: string; until: string } | null;
+  moves: BudgetRebalanceMove[];
+  skipped: BudgetRebalanceSkipped[];
+  pullRequest: BudgetRebalancePullRequest | null;
+  errorMessage?: string;
+}
+
+interface BudgetRebalanceRunSummary {
+  status: string;
+  accountsProcessed: number;
+  succeeded: number;
+  noMoves: number;
+  disabled: number;
+  policyMissing: number;
+  prFailed: number;
+  policyPath: string | null;
+  accounts: BudgetRebalanceAccountSummary[];
+}
+
 interface CronRunRow {
   id: string;
   name: string;
@@ -247,6 +301,115 @@ function parseBudgetGuardSummary(output: unknown): BudgetGuardSummary | null {
   };
 }
 
+const VALID_REBALANCE_STATUS = new Set<BudgetRebalanceRunStatus>([
+  "succeeded",
+  "no_account",
+  "policy_missing",
+  "disabled",
+  "no_moves",
+  "pr_failed",
+]);
+
+function parseBudgetRebalanceRunSummary(output: unknown): BudgetRebalanceRunSummary | null {
+  if (!isRecord(output)) return null;
+  const accountsRaw = Array.isArray(output.accounts) ? output.accounts : [];
+  const accounts = accountsRaw
+    .map(parseBudgetRebalanceAccountSummary)
+    .filter((x): x is BudgetRebalanceAccountSummary => x !== null);
+  if (accounts.length === 0 && output.kind !== "budget_rebalance") return null;
+  return {
+    status: readString(output.status, "succeeded"),
+    accountsProcessed: readNumber(output.accountsProcessed),
+    succeeded: readNumber(output.succeeded),
+    noMoves: readNumber(output.no_moves),
+    disabled: readNumber(output.disabled),
+    policyMissing: readNumber(output.policy_missing),
+    prFailed: readNumber(output.pr_failed),
+    policyPath: typeof output.policyPath === "string" ? output.policyPath : null,
+    accounts,
+  };
+}
+
+function parseBudgetRebalanceAccountSummary(
+  output: unknown,
+): BudgetRebalanceAccountSummary | null {
+  if (!isRecord(output)) return null;
+  if (
+    typeof output.status !== "string" ||
+    !VALID_REBALANCE_STATUS.has(output.status as BudgetRebalanceRunStatus) ||
+    typeof output.accountKey !== "string"
+  ) {
+    return null;
+  }
+  const accountKey = output.accountKey;
+  const plan = isRecord(output.plan) ? output.plan : null;
+  const moves = Array.isArray(plan?.moves)
+    ? plan.moves
+        .map((move) => parseBudgetRebalanceMove(accountKey, move))
+        .filter((x): x is BudgetRebalanceMove => x !== null)
+    : [];
+  const skipped = Array.isArray(plan?.skipped)
+    ? plan.skipped
+        .map((item) => parseBudgetRebalanceSkipped(accountKey, item))
+        .filter((x): x is BudgetRebalanceSkipped => x !== null)
+    : [];
+  const pr = isRecord(output.pullRequest)
+    ? {
+        prNumber: readNumber(output.pullRequest.prNumber),
+        htmlUrl: readString(output.pullRequest.htmlUrl),
+      }
+    : null;
+  return {
+    status: output.status as BudgetRebalanceRunStatus,
+    accountKey,
+    candidateCount: readNumber(output.candidateCount),
+    policyEnabled:
+      typeof output.policyEnabled === "boolean" ? output.policyEnabled : null,
+    window: isRecord(output.window)
+      ? {
+          since: readString(output.window.since),
+          until: readString(output.window.until),
+        }
+      : null,
+    moves,
+    skipped,
+    pullRequest: pr && pr.prNumber > 0 && pr.htmlUrl ? pr : null,
+    ...(typeof output.errorMessage === "string"
+      ? { errorMessage: output.errorMessage }
+      : {}),
+  };
+}
+
+function parseBudgetRebalanceMove(
+  accountKey: string,
+  value: unknown,
+): BudgetRebalanceMove | null {
+  if (!isRecord(value)) return null;
+  const direction = readString(value.direction);
+  if (direction !== "increase" && direction !== "decrease") return null;
+  return {
+    accountKey,
+    nodeKey: readString(value.nodeKey),
+    displayName: readString(value.displayName, readString(value.nodeKey)),
+    direction,
+    fromMajor: readNumber(value.fromMajor),
+    toMajor: readNumber(value.toMajor),
+    deltaPercent: readNumber(value.deltaPercent),
+    reason: readString(value.reason),
+  };
+}
+
+function parseBudgetRebalanceSkipped(
+  accountKey: string,
+  value: unknown,
+): BudgetRebalanceSkipped | null {
+  if (!isRecord(value)) return null;
+  const nodeKey = readString(value.nodeKey);
+  const reason = readString(value.reason);
+  if (!nodeKey || !reason) return null;
+  return { accountKey, nodeKey, reason };
+}
+
 function cronStateToStatus(state: string): StatusState {
   switch (state) {
     case "success":
@@ -294,6 +457,36 @@ function summaryStatusLabel(status: BudgetGuardRunStatus): string {
     no_account: "対象なし",
     policy_missing: "ルール未設定",
     ai_failed: "AI判断失敗",
+  };
+  return labels[status] ?? status;
+}
+
+function rebalanceStatusToState(status: BudgetRebalanceRunStatus | string): StatusState {
+  switch (status) {
+    case "succeeded":
+      return "ok";
+    case "no_moves":
+    case "disabled":
+      return "idle";
+    case "no_account":
+    case "policy_missing":
+      return "warn";
+    case "pr_failed":
+      return "error";
+    default:
+      return "idle";
+  }
+}
+
+function rebalanceStatusLabel(status: BudgetRebalanceRunStatus | string): string {
+  const labels: Record<string, string> = {
+    succeeded: "PR作成",
+    no_account: "対象なし",
+    policy_missing: "ポリシー未設定",
+    disabled: "停止中",
+    no_moves: "変更なし",
+    pr_failed: "PR作成失敗",
+    failed: "失敗",
   };
   return labels[status] ?? status;
 }
@@ -397,6 +590,11 @@ function formatRatio(n: number): string {
   return `${(n * 100).toFixed(1)}%`;
 }
 
+function formatMajor(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
 function formatRule(rule: BudgetGuardAlertRule): string {
   switch (rule) {
     case "daily_budget_80":
@@ -420,10 +618,12 @@ export default async function BudgetGuardPage({
   const resolvedSearchParams = await searchParams;
   let runs: CronRunRow[] = [];
   let latestRunCandidates: CronRunRow[] = [];
+  let latestRebalanceRun: CronRunRow | null = null;
   let aiRuns: AiRunRow[] = [];
   let runsTotal = 0;
   let aiRunsTotal = 0;
   let schedules: ScheduleRow[] = [];
+  let rebalanceSchedule: ScheduleRow | null = null;
   let adAccountTimeZones: AdAccountTimeZoneRow[] = [];
   let policyConfig: Awaited<ReturnType<typeof loadBudgetGuardPolicyConfig>> | null = null;
   let dbReady = true;
@@ -444,7 +644,19 @@ export default async function BudgetGuardPage({
       "aiRunsPage",
       aiRunsTotal
     );
-    [runs, latestRunCandidates, aiRuns, schedules, adAccountTimeZones] = await Promise.all([
+    const rebalanceRunsWhere = {
+      name: "budget_rebalance",
+      schedule: { is: { workspaceId: workspace.id } },
+    };
+    const [
+      runsResult,
+      latestRunCandidatesResult,
+      aiRunsResult,
+      schedulesResult,
+      rebalanceRunsResult,
+      rebalanceSchedulesResult,
+      adAccountTimeZonesResult,
+    ] = await Promise.all([
       prisma.cronRun.findMany({
         where: runsWhere,
         orderBy: { startedAt: "desc" },
@@ -505,11 +717,43 @@ export default async function BudgetGuardPage({
           nextRunAt: true,
         },
       }),
+      prisma.cronRun.findMany({
+        where: rebalanceRunsWhere,
+        orderBy: { startedAt: "desc" },
+        take: 1,
+        select: {
+          id: true,
+          name: true,
+          state: true,
+          startedAt: true,
+          finishedAt: true,
+          durationMs: true,
+          errorMessage: true,
+          output: true,
+        },
+      }),
+      prisma.cronSchedule.findMany({
+        where: { workspaceId: workspace.id, name: "budget_rebalance" },
+        select: {
+          name: true,
+          cron: true,
+          enabled: true,
+          lastRunState: true,
+          nextRunAt: true,
+        },
+      }),
       prisma.adAccount.findMany({
         where: { workspaceId: workspace.id, active: true },
         select: { workspaceId: true, key: true, timezoneName: true },
       }),
     ]);
+    runs = runsResult;
+    latestRunCandidates = latestRunCandidatesResult;
+    aiRuns = aiRunsResult;
+    schedules = schedulesResult;
+    latestRebalanceRun = rebalanceRunsResult[0] ?? null;
+    rebalanceSchedule = rebalanceSchedulesResult[0] ?? null;
+    adAccountTimeZones = adAccountTimeZonesResult;
     policyConfig = await loadBudgetGuardPolicyConfig({
       prisma,
       workspaceId: workspace.id,
@@ -545,6 +789,7 @@ export default async function BudgetGuardPage({
   const scheduleRow = schedules[0] ?? null;
   const scheduleView: ScheduleRow | null = scheduleRow;
   const budgetPreset = CRON_PRESETS.find((preset) => preset.name === "budget_guard");
+  const rebalancePreset = CRON_PRESETS.find((preset) => preset.name === "budget_rebalance");
   const timeZoneByAccount = new Map(
     adAccountTimeZones.map((row) => [`${row.workspaceId}:${row.key}`, row.timezoneName])
   );
@@ -763,6 +1008,146 @@ export default async function BudgetGuardPage({
       ),
       className: "tabular",
       headerClassName: "tabular",
+    },
+  ];
+
+  const rebalanceSummary = latestRebalanceRun
+    ? parseBudgetRebalanceRunSummary(latestRebalanceRun.output)
+    : null;
+  const rebalanceMoves = rebalanceSummary
+    ? rebalanceSummary.accounts.flatMap((account) => account.moves)
+    : [];
+  const rebalanceSkipped = rebalanceSummary
+    ? rebalanceSummary.accounts.flatMap((account) => account.skipped)
+    : [];
+  const latestRebalancePr =
+    rebalanceSummary?.accounts.find((account) => account.pullRequest)?.pullRequest ??
+    null;
+  const rebalanceItems: KeyValueEntry[] = [
+    {
+      label: "ポリシー",
+      value: (
+        <InlineCode>
+          {rebalanceSummary?.policyPath ??
+            (policyConfig?.rootDir ? "workflows/budget-rebalance.yaml" : "未接続")}
+        </InlineCode>
+      ),
+    },
+    {
+      label: "自動実行",
+      value: rebalanceSchedule ? (
+        <StatusBadge state={rebalanceSchedule.enabled ? "ok" : "idle"}>
+          {rebalanceSchedule.enabled ? "有効" : "停止中"}
+        </StatusBadge>
+      ) : (
+        <span>未登録</span>
+      ),
+    },
+    {
+      label: "実行タイミング",
+      value: (
+        <InlineCode>
+          {rebalanceSchedule?.cron || rebalancePreset?.cron || "0 10 * * 2"}
+        </InlineCode>
+      ),
+    },
+    {
+      label: "直近結果",
+      value: rebalanceSummary ? (
+        <StatusBadge state={rebalanceStatusToState(rebalanceSummary.status)}>
+          {rebalanceStatusLabel(rebalanceSummary.status)}
+        </StatusBadge>
+      ) : (
+        <span>未実行</span>
+      ),
+    },
+    {
+      label: "対象アカウント",
+      value: (
+        <span className="tabular-nums">
+          {rebalanceSummary?.accountsProcessed ?? 0}
+        </span>
+      ),
+    },
+    {
+      label: "変更案",
+      value: (
+        <span className="tabular-nums">{rebalanceMoves.length}</span>
+      ),
+    },
+    {
+      label: "スキップ",
+      value: (
+        <span className="tabular-nums">{rebalanceSkipped.length}</span>
+      ),
+    },
+    {
+      label: "PR",
+      value: latestRebalancePr ? (
+        <a href={latestRebalancePr.htmlUrl} target="_blank" rel="noreferrer">
+          #{latestRebalancePr.prNumber}
+        </a>
+      ) : (
+        <span>—</span>
+      ),
+    },
+  ];
+
+  const rebalanceMoveColumns: DataTableColumn<BudgetRebalanceMove>[] = [
+    {
+      header: "広告アカウント",
+      cell: (row) => <InlineCode>{row.accountKey}</InlineCode>,
+    },
+    {
+      header: "広告セット",
+      cell: (row) => row.displayName || <InlineCode>{row.nodeKey}</InlineCode>,
+    },
+    {
+      header: "方向",
+      cell: (row) => (
+        <StatusBadge state={row.direction === "increase" ? "warn" : "info"}>
+          {row.direction === "increase" ? "増額" : "減額"}
+        </StatusBadge>
+      ),
+    },
+    {
+      header: "日予算",
+      cell: (row) => (
+        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+          {formatMajor(row.fromMajor)} → {formatMajor(row.toMajor)}
+        </span>
+      ),
+      className: "tabular",
+      headerClassName: "tabular",
+    },
+    {
+      header: "差分",
+      cell: (row) => (
+        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+          {row.deltaPercent}%
+        </span>
+      ),
+      className: "tabular",
+      headerClassName: "tabular",
+    },
+    {
+      header: "理由",
+      cell: (row) => row.reason,
+    },
+  ];
+
+  const rebalanceSkippedColumns: DataTableColumn<BudgetRebalanceSkipped>[] = [
+    {
+      header: "広告アカウント",
+      cell: (row) => <InlineCode>{row.accountKey}</InlineCode>,
+    },
+    {
+      header: "対象",
+      cell: (row) => <InlineCode>{row.nodeKey}</InlineCode>,
+    },
+    {
+      header: "理由",
+      cell: (row) => <InlineCode>{row.reason}</InlineCode>,
     },
   ];
 
@@ -1067,6 +1452,80 @@ export default async function BudgetGuardPage({
             />
           ) : (
             <KeyValueList items={scheduleItems} />
+          )}
+        </Panel>
+
+        <Panel
+          title="予算再配分"
+          subtitle="CPA 効率を見て広告セット間の日予算移動案を GitOps PR として提案します"
+          status={
+            <StatusDot
+              state={
+                !dbReady
+                  ? "warn"
+                  : rebalanceSummary
+                    ? rebalanceStatusToState(rebalanceSummary.status)
+                    : rebalanceSchedule?.enabled
+                      ? "info"
+                      : "idle"
+              }
+            >
+              {!dbReady
+                ? "要確認"
+                : rebalanceSummary
+                  ? rebalanceStatusLabel(rebalanceSummary.status)
+                  : rebalanceSchedule?.enabled
+                    ? "待機中"
+                    : "停止中"}
+            </StatusDot>
+          }
+        >
+          {!dbReady ? (
+            <EmptyState
+              title="予算再配分の状態を読み出せません"
+              description="接続と健康状態を確認してください。"
+            />
+          ) : (
+            <div style={{ display: "grid", gap: "1rem" }}>
+              <KeyValueList items={rebalanceItems} />
+              {latestRebalanceRun ? (
+                <div
+                  style={{
+                    fontSize: "0.8125rem",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  直近実行:{" "}
+                  <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+                    {formatDateTime(latestRebalanceRun.startedAt, {
+                      timeZone: pageDisplayTimeZone,
+                    })}
+                  </span>
+                  {latestRebalanceRun.errorMessage
+                    ? ` · ${latestRebalanceRun.errorMessage}`
+                    : ""}
+                </div>
+              ) : null}
+              <DataTable
+                rows={rebalanceMoves}
+                rowKey={(row, index) => `${row.accountKey}:${row.nodeKey}:${index}`}
+                columns={rebalanceMoveColumns}
+                empty={
+                  <EmptyState
+                    title="直近の再配分案はありません"
+                    description="ポリシーが有効で、十分な成果データと移動元・移動先がある場合だけPRを作成します。"
+                  />
+                }
+              />
+              {rebalanceSkipped.length > 0 ? (
+                <DataTable
+                  rows={rebalanceSkipped}
+                  rowKey={(row, index) => `${row.accountKey}:${row.nodeKey}:${index}`}
+                  columns={rebalanceSkippedColumns}
+                  empty={null}
+                />
+              ) : null}
+            </div>
           )}
         </Panel>
 

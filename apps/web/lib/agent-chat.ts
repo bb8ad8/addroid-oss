@@ -2859,6 +2859,8 @@ function reportPreset(value: string): CronPresetName {
         ? "today_report"
         : v === "budget" || v === "budget_guard"
           ? "budget_guard"
+          : v === "rebalance" || v === "budget_rebalance" || v === "予算再配分"
+            ? "budget_rebalance"
         : v === "improvement" || v === "improvements" || v === "improvement_pr"
           ? "improvement_pr"
           : v === "creative" ||

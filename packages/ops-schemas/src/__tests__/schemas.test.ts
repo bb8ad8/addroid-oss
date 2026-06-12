@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import {
   AutomationRulesYamlSchema,
+  BudgetRebalancePolicyYamlSchema,
   BudgetGuardPolicyYamlSchema,
   CronYamlSchema,
   ProjectYamlSchema,
   SubmissionGuardsYamlSchema,
   loadAutomationRules,
+  loadBudgetRebalancePolicy,
   loadBudgetGuardPolicy,
   loadSubmissionGuardsPolicy,
 } from "../index.js";
@@ -26,7 +28,7 @@ test("CronYamlSchema validates cron fields and duplicates", () => {
   assert.equal(
     CronYamlSchema.safeParse({
       version: 1,
-      schedules: [{ name: "daily_report", cron: "0 9 * * *", enabled: true }],
+      schedules: [{ name: "budget_rebalance", cron: "0 10 * * 2", enabled: false }],
     }).success,
     true
   );
@@ -57,6 +59,25 @@ test("BudgetGuardPolicyYamlSchema accepts optional policy fields", () => {
     accounts: { primary: { dailyBudget: 500, monthlyBudget: 15000, currency: "JPY" } },
   });
   assert.equal(out.success, true);
+});
+
+test("BudgetRebalancePolicyYamlSchema defaults optional controls and caps ranges", () => {
+  const out = BudgetRebalancePolicyYamlSchema.safeParse({
+    version: 1,
+    enabled: true,
+  });
+  assert.equal(out.success, true);
+  if (!out.success) throw new Error("expected success");
+  assert.equal(out.data.lookbackDays, 14);
+  assert.equal(out.data.keepTotalBudget, true);
+  assert.equal(
+    BudgetRebalancePolicyYamlSchema.safeParse({
+      version: 1,
+      enabled: true,
+      lookbackDays: 90,
+    }).success,
+    false
+  );
 });
 
 test("SubmissionGuardsYamlSchema accepts budget increase guard and rejects inverted ratios", () => {
@@ -107,11 +128,17 @@ test("loadBudgetGuardPolicy and loadAutomationRules read ops policy files lenien
       "utf8"
     );
     fs.writeFileSync(
+      path.join(dir, "workflows/budget-rebalance.yaml"),
+      "version: 1\nenabled: true\nlookbackDays: 14\n",
+      "utf8"
+    );
+    fs.writeFileSync(
       path.join(dir, "workflows/guards.yaml"),
       "version: 1\nguards:\n  budgetIncrease:\n    warnOverRatio: 2\n    blockOverRatio: 5\n",
       "utf8"
     );
     assert.equal(loadBudgetGuardPolicy(dir)?.version, 1);
+    assert.equal(loadBudgetRebalancePolicy(dir)?.enabled, true);
     assert.equal(loadAutomationRules(dir)?.rules.length, 0);
     assert.equal(loadSubmissionGuardsPolicy(dir)?.guards.budgetIncrease.blockOverRatio, 5);
   } finally {

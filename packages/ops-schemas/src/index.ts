@@ -91,6 +91,7 @@ export const CronEntrySchema = z
       "daily_report",
       "today_report",
       "budget_guard",
+      "budget_rebalance",
       "improvement_pr",
       "auto_creative_generation",
       "retention_sweep",
@@ -159,6 +160,21 @@ export const BudgetGuardPolicyYamlSchema = z
   .strict();
 
 export type BudgetGuardPolicyYaml = z.infer<typeof BudgetGuardPolicyYamlSchema>;
+
+export const BudgetRebalancePolicyYamlSchema = z
+  .object({
+    version: z.literal(1),
+    enabled: z.boolean().default(false),
+    lookbackDays: z.number().int().min(7).max(28).default(14),
+    maxShiftPercentPerRun: z.number().min(1).max(30).default(20),
+    minDailyBudgetMajor: z.number().min(0).default(0),
+    minConversionsForJudgement: z.number().int().min(1).default(10),
+    keepTotalBudget: z.boolean().default(true),
+    excludeNodeKeys: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export type BudgetRebalancePolicyYaml = z.infer<typeof BudgetRebalancePolicyYamlSchema>;
 
 export const SubmissionGuardBudgetIncreaseSchema = z
   .object({
@@ -332,6 +348,7 @@ export interface OpsRepoLayout {
   projectYaml: string;
   cronYaml: string;
   budgetGuardYaml: string;
+  budgetRebalanceYaml: string;
   submissionGuardsYaml: string;
   automationRulesYaml: string;
 }
@@ -340,6 +357,7 @@ export const DEFAULT_OPS_REPO_LAYOUT: OpsRepoLayout = {
   projectYaml: ".addroid/project.yaml",
   cronYaml: "workflows/cron.yaml",
   budgetGuardYaml: "workflows/budget-guard.yaml",
+  budgetRebalanceYaml: "workflows/budget-rebalance.yaml",
   submissionGuardsYaml: "workflows/guards.yaml",
   automationRulesYaml: "workflows/automation-rules.yaml",
 };
@@ -349,6 +367,13 @@ export function loadBudgetGuardPolicy(
   layout: OpsRepoLayout = DEFAULT_OPS_REPO_LAYOUT
 ): BudgetGuardPolicyYaml | null {
   return loadYamlFile(rootDir, layout.budgetGuardYaml, BudgetGuardPolicyYamlSchema);
+}
+
+export function loadBudgetRebalancePolicy(
+  rootDir: string,
+  layout: OpsRepoLayout = DEFAULT_OPS_REPO_LAYOUT
+): BudgetRebalancePolicyYaml | null {
+  return loadYamlFile(rootDir, layout.budgetRebalanceYaml, BudgetRebalancePolicyYamlSchema);
 }
 
 export function loadSubmissionGuardsPolicy(

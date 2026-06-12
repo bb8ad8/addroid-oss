@@ -329,6 +329,28 @@ export {
 } from "./budget-guard.js";
 
 export {
+  buildBudgetRebalancePullRequest,
+  computeRebalancePlan,
+  rebalanceCandidateFromSnapshot,
+  runBudgetRebalanceOnce,
+  type BudgetRebalanceAuditInput,
+  type BudgetRebalanceAuditWriter,
+  type BudgetRebalanceExecutionMode,
+  type BudgetRebalancePolicy,
+  type BudgetRebalancePublisher,
+  type BudgetRebalancePullRequestRecord,
+  type BudgetRebalancePullRequestRequest,
+  type BudgetRebalanceRunStatus,
+  type BudgetRebalanceStore,
+  type BudgetRebalanceSummary,
+  type RebalanceCandidate,
+  type RebalanceMove,
+  type RebalancePlan,
+  type RebalanceSkipped,
+  type RunBudgetRebalanceOptions,
+} from "./budget-rebalance.js";
+
+export {
   DEFAULT_RETENTION_POLICY,
   runPerformanceSnapshotRetentionOnce,
   type PerformanceSnapshotRetentionStore,

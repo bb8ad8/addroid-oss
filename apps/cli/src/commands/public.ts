@@ -22,6 +22,7 @@ type CronPreset =
   | "daily_report"
   | "today_report"
   | "budget_guard"
+  | "budget_rebalance"
   | "improvement_pr"
   | "auto_creative_generation"
   | "retention_sweep";
@@ -243,6 +244,7 @@ function reportPreset(value: string): CronPreset | null {
   if (v === "daily" || v === "report" || v === "daily_report") return "daily_report";
   if (v === "today" || v === "current" || v === "today_report") return "today_report";
   if (v === "budget" || v === "budget_guard") return "budget_guard";
+  if (v === "rebalance" || v === "budget_rebalance" || v === "予算再配分") return "budget_rebalance";
   if (v === "improvement" || v === "improvements" || v === "improvement_pr") return "improvement_pr";
   if (
     v === "creative" ||

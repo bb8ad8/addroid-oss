@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 予算再配分 PR
+
+- CPA 効率に基づく `budget_rebalance` cron preset、`workflows/budget-rebalance.yaml` policy、GitOps PR 提案、`/budget` の予算再配分ビューを追加。
+
 ### Added — 自然言語実績クエリ
 
 - 自然言語の実績問い合わせ向けに `query_performance` / `compare_performance` Agent tool と安全な定型集計カタログを追加。

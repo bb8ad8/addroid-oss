@@ -41,6 +41,13 @@ export const CRON_PRESETS = [
     enabledByDefault: false,
   },
   {
+    name: "budget_rebalance",
+    cron: "0 10 * * 2",
+    description:
+      "CPA 効率に基づく adset 予算再配分案を毎週火曜10時に計算し、GitOps PR として提案する",
+    enabledByDefault: false,
+  },
+  {
     name: "improvement_pr",
     cron: "0 10 * * 1",
     description:
