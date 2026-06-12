@@ -19,10 +19,7 @@ import {
   type AdAccountLockProvider,
   type MetaRateLimitPolicy,
 } from "./rate-limit.js";
-import {
-  resolveExecutionMode,
-  type ExecutionMode,
-} from "./execution-mode.js";
+import { resolveExecutionMode, type ExecutionMode } from "./execution-mode.js";
 import type {
   AccountExecutionModes,
   ApplyApprovalSnapshot,
@@ -138,9 +135,13 @@ export interface LegacyApplyAction {
   bodies?: any;
   descriptions?: any;
   callToActions?: any;
+  cards?: any;
 }
 
-export type ApplyAction = GraphOperationAction | MetaCliOperationAction | LegacyApplyAction;
+export type ApplyAction =
+  | GraphOperationAction
+  | MetaCliOperationAction
+  | LegacyApplyAction;
 
 // ---------------------------------------------------------------------
 // AdsLoader — apply_job が指す PR から operation manifest を返す境界。
@@ -167,8 +168,8 @@ export interface AdsLoadResult {
   /** 影響を受けたアカウント分の状態。空配列なら "no source" 扱い → simulated。 */
   accounts: AccountAdsState[];
   /**
- * Operation Manifest から直接構築した実行アクション。
- */
+   * Operation Manifest から直接構築した実行アクション。
+   */
   directActions?: Array<{ accountKey: string; actions: ApplyAction[] }>;
 }
 
@@ -360,7 +361,7 @@ const defaultSleep = (ms: number): Promise<void> =>
  *   6. apply_jobs を確定 (succeeded / failed)、audit_logs に終端イベントを 1 行。
  */
 export async function runExecuteApply(
-  opts: RunExecuteApplyOptions
+  opts: RunExecuteApplyOptions,
 ): Promise<RunExecuteApplySummary> {
   const sleep = opts.sleep ?? defaultSleep;
   const maxAttemptsDefault = opts.defaultRateLimitMaxAttempts ?? 3;
@@ -377,7 +378,7 @@ export async function runExecuteApply(
 
   const baseSummary = (
     state: ApplyTerminalState,
-    extra: Partial<RunExecuteApplySummary> = {}
+    extra: Partial<RunExecuteApplySummary> = {},
   ): RunExecuteApplySummary => ({
     applyJobId: opts.applyJobId,
     state,
@@ -389,8 +390,12 @@ export async function runExecuteApply(
     skipped: extra.skipped ?? 0,
     pausedRewrites: extra.pausedRewrites ?? 0,
     outcomes: extra.outcomes ?? [],
-    ...(extra.errorMessage !== undefined ? { errorMessage: extra.errorMessage } : {}),
-    ...(extra.abortReason !== undefined ? { abortReason: extra.abortReason } : {}),
+    ...(extra.errorMessage !== undefined
+      ? { errorMessage: extra.errorMessage }
+      : {}),
+    ...(extra.abortReason !== undefined
+      ? { abortReason: extra.abortReason }
+      : {}),
   });
 
   // 1) PR メタ取得
@@ -542,7 +547,10 @@ export async function runExecuteApply(
       ? load.accounts.length
       : new Set((load.directActions ?? []).map((a) => a.accountKey)).size;
 
-  if (load.accounts.length === 0 && (!load.directActions || load.directActions.length === 0)) {
+  if (
+    load.accounts.length === 0 &&
+    (!load.directActions || load.directActions.length === 0)
+  ) {
     // mocked equivalent path: ローダがソースを提供できない場合は simulated。
     await opts.store.recordApplyExecutionLog({
       workspaceId: opts.workspaceId,
@@ -603,7 +611,7 @@ export async function runExecuteApply(
   });
   const reportOnlyAccounts = collectReportOnlyAccounts(
     accountKeys,
-    modeContext
+    modeContext,
   );
   if (reportOnlyAccounts.length > 0) {
     const errorMessage =
@@ -754,7 +762,7 @@ export async function runExecuteApply(
       }),
       async () => {
         await runPlanForAccount(plan);
-      }
+      },
     );
   }
 
@@ -764,7 +772,10 @@ export async function runExecuteApply(
   // 以降の処理は元の終端ブロックへ続く。
 
   // ----- 内部関数: 1 アカウント分の plan を実行する -----
-  async function runPlanForAccount(plan: { accountKey: string; actions: ApplyAction[] }): Promise<void> {
+  async function runPlanForAccount(plan: {
+    accountKey: string;
+    actions: ApplyAction[];
+  }): Promise<void> {
     for (const rawAction of plan.actions) {
       totalActions += 1;
       const { action, rewritten } = prepareApprovedApplyAction(rawAction);
@@ -890,7 +901,10 @@ export async function runExecuteApply(
         // 永久に拒否される。executor が externalId を返さなかった場合は
         // 「Meta 側に作成されたかも知れないが追跡不能」状態として fail-closed
         // し、null externalId の PAUSED 行は決して作らない。
-        if (actionRequiresExternalId(action) && !nonEmptyString(finalResult.externalId)) {
+        if (
+          actionRequiresExternalId(action) &&
+          !nonEmptyString(finalResult.externalId)
+        ) {
           failed += 1;
           const message =
             `${action.kind} reported success but the Meta executor returned no externalId; ` +
@@ -1006,7 +1020,8 @@ export async function runExecuteApply(
         // 等の旧 caller が notify を立てない場合は legacy 値にフォールバック。
         await opts.store.recordApplyAudit({
           workspaceId: opts.workspaceId,
-          action: finalResult.notify?.auditAction ?? "oauth.meta.reauth_required",
+          action:
+            finalResult.notify?.auditAction ?? "oauth.meta.reauth_required",
           applyJobId: opts.applyJobId,
           pullRequestId: context.pullRequestId,
           prNumber: context.prNumber,
@@ -1213,7 +1228,7 @@ function actionForLog(action: ApplyAction): JsonValue {
  * 同じルールを適用する (executor 側で漏れた場合の二重防御)。
  */
 export function isCreateActionRequiringExternalId(
-  kind: ApplyAction["kind"]
+  kind: ApplyAction["kind"],
 ): boolean {
   return (
     kind === "create_campaign" ||
@@ -1226,7 +1241,8 @@ export function isCreateActionRequiringExternalId(
 }
 
 function actionRequiresExternalId(action: ApplyAction): boolean {
-  if (action.kind === "meta_cli_operation") return action.externalIdRequired === true;
+  if (action.kind === "meta_cli_operation")
+    return action.externalIdRequired === true;
   return isCreateActionRequiringExternalId(action.kind);
 }
 
@@ -1253,7 +1269,9 @@ function deriveAppliedAdsNodeInput(args: {
     const entity = action.entity ?? graphEntityForAction(action);
     if (!entity?.nodeType || !entity.nodeKey) return null;
     const nodeType =
-      entity.nodeType === "campaign" || entity.nodeType === "adset" || entity.nodeType === "ad"
+      entity.nodeType === "campaign" ||
+      entity.nodeType === "adset" ||
+      entity.nodeType === "ad"
         ? entity.nodeType
         : null;
     if (!nodeType) return null;
@@ -1262,7 +1280,9 @@ function deriveAppliedAdsNodeInput(args: {
         ? entity.parentNodeType
         : undefined;
     const status =
-      entity.status === "active" || entity.status === "paused" || entity.status === "archived"
+      entity.status === "active" ||
+      entity.status === "paused" ||
+      entity.status === "archived"
         ? entity.status
         : statusFromGraphPayload(action.payload);
     return {
@@ -1270,9 +1290,13 @@ function deriveAppliedAdsNodeInput(args: {
       accountKey: action.account,
       nodeType,
       nodeKey: entity.nodeKey,
-      ...(entity.displayName ? { displayName: entity.displayName } : displayNameFromGraphPayload(action.payload)),
+      ...(entity.displayName
+        ? { displayName: entity.displayName }
+        : displayNameFromGraphPayload(action.payload)),
       ...(parentNodeType ? { parentNodeType } : {}),
-      ...(entity.parentNodeKey ? { parentNodeKey: entity.parentNodeKey } : parentNodeFromGraphPayload(action)),
+      ...(entity.parentNodeKey
+        ? { parentNodeKey: entity.parentNodeKey }
+        : parentNodeFromGraphPayload(action)),
       ...externalIdMaybe,
       lastCommitSha,
       spec,
@@ -1283,7 +1307,9 @@ function deriveAppliedAdsNodeInput(args: {
     const entity = action.entity;
     if (!entity?.nodeType || !entity.nodeKey) return null;
     const nodeType =
-      entity.nodeType === "campaign" || entity.nodeType === "adset" || entity.nodeType === "ad"
+      entity.nodeType === "campaign" ||
+      entity.nodeType === "adset" ||
+      entity.nodeType === "ad"
         ? entity.nodeType
         : null;
     if (!nodeType) return null;
@@ -1292,7 +1318,9 @@ function deriveAppliedAdsNodeInput(args: {
         ? entity.parentNodeType
         : undefined;
     const status =
-      entity.status === "active" || entity.status === "paused" || entity.status === "archived"
+      entity.status === "active" ||
+      entity.status === "paused" ||
+      entity.status === "archived"
         ? entity.status
         : undefined;
     return {
@@ -1319,7 +1347,9 @@ function deriveAppliedAdsNodeInput(args: {
       ...externalIdMaybe,
       lastCommitSha,
       spec,
-      ...(typeof action.initialState === "string" ? { status: normalizeNodeStatus(action.initialState) } : {}),
+      ...(typeof action.initialState === "string"
+        ? { status: normalizeNodeStatus(action.initialState) }
+        : {}),
     };
   }
   if (action.kind === "create_adset" || action.kind === "update_adset") {
@@ -1334,7 +1364,9 @@ function deriveAppliedAdsNodeInput(args: {
       ...externalIdMaybe,
       lastCommitSha,
       spec,
-      ...(typeof action.initialState === "string" ? { status: normalizeNodeStatus(action.initialState) } : {}),
+      ...(typeof action.initialState === "string"
+        ? { status: normalizeNodeStatus(action.initialState) }
+        : {}),
     };
   }
   if (action.kind === "create_ad" || action.kind === "update_ad") {
@@ -1349,15 +1381,25 @@ function deriveAppliedAdsNodeInput(args: {
       ...externalIdMaybe,
       lastCommitSha,
       spec,
-      ...(typeof action.initialState === "string" ? { status: normalizeNodeStatus(action.initialState) } : {}),
+      ...(typeof action.initialState === "string"
+        ? { status: normalizeNodeStatus(action.initialState) }
+        : {}),
     };
   }
   return null;
 }
 
-function graphEntityForAction(action: GraphOperationAction): NonNullable<GraphOperationAction["entity"]> | null {
+function graphEntityForAction(
+  action: GraphOperationAction,
+): NonNullable<GraphOperationAction["entity"]> | null {
   const [nodeType, verb] = action.kind.split(".") as [string, string];
-  if (nodeType !== "campaign" && nodeType !== "adset" && nodeType !== "ad" && nodeType !== "creative") return null;
+  if (
+    nodeType !== "campaign" &&
+    nodeType !== "adset" &&
+    nodeType !== "ad" &&
+    nodeType !== "creative"
+  )
+    return null;
   const key =
     readPayloadString(action.payload, `${nodeType}Id`) ??
     readPayloadString(action.payload, "id") ??
@@ -1390,38 +1432,59 @@ function graphEntityForAction(action: GraphOperationAction): NonNullable<GraphOp
   };
 }
 
-function readPayloadString(payload: Record<string, unknown>, key: string): string | null {
+function readPayloadString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
   const value = payload[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function displayNameFromGraphPayload(payload: Record<string, unknown>): { displayName: string } | {} {
+function displayNameFromGraphPayload(
+  payload: Record<string, unknown>,
+): { displayName: string } | {} {
   const name = readPayloadString(payload, "name");
   return name ? { displayName: name } : {};
 }
 
-function parentNodeFromGraphPayload(action: GraphOperationAction): { parentNodeType: "campaign" | "adset"; parentNodeKey: string } | {} {
+function parentNodeFromGraphPayload(
+  action: GraphOperationAction,
+): { parentNodeType: "campaign" | "adset"; parentNodeKey: string } | {} {
   if (action.kind.startsWith("adset.")) {
-    const parent = readPayloadString(action.payload, "campaignRef") ?? readPayloadString(action.payload, "campaignId");
+    const parent =
+      readPayloadString(action.payload, "campaignRef") ??
+      readPayloadString(action.payload, "campaignId");
     return parent ? { parentNodeType: "campaign", parentNodeKey: parent } : {};
   }
   if (action.kind.startsWith("ad.")) {
-    const parent = readPayloadString(action.payload, "adsetRef") ?? readPayloadString(action.payload, "adsetId");
+    const parent =
+      readPayloadString(action.payload, "adsetRef") ??
+      readPayloadString(action.payload, "adsetId");
     return parent ? { parentNodeType: "adset", parentNodeKey: parent } : {};
   }
   return {};
 }
 
-function statusFromGraphPayload(payload: Record<string, unknown>): "active" | "paused" | "archived" | undefined {
+function statusFromGraphPayload(
+  payload: Record<string, unknown>,
+): "active" | "paused" | "archived" | undefined {
   const status = readPayloadString(payload, "status");
   return status ? normalizeNodeStatus(status) : undefined;
 }
 
-function isGraphOperationAction(action: ApplyAction): action is GraphOperationAction {
-  return "payload" in action && typeof action.kind === "string" && action.kind.includes(".");
+function isGraphOperationAction(
+  action: ApplyAction,
+): action is GraphOperationAction {
+  return (
+    "payload" in action &&
+    typeof action.kind === "string" &&
+    action.kind.includes(".")
+  );
 }
 
-function normalizeNodeStatus(value: string): "active" | "paused" | "archived" | undefined {
+function normalizeNodeStatus(
+  value: string,
+): "active" | "paused" | "archived" | undefined {
   const v = value.toLowerCase();
   if (v === "active" || v === "paused" || v === "archived") return v;
   return undefined;
@@ -1512,21 +1575,30 @@ function nodeIdentForAction(action: ApplyAction): NodeIdent {
     const [nodeType] = action.kind.split(".");
     const entity = action.entity ?? graphEntityForAction(action);
     return {
-      nodeType: (entity?.nodeType as NodeIdent["nodeType"] | undefined) ?? (nodeType as NodeIdent["nodeType"]) ?? "campaign",
+      nodeType:
+        (entity?.nodeType as NodeIdent["nodeType"] | undefined) ??
+        (nodeType as NodeIdent["nodeType"]) ??
+        "campaign",
       nodeKey: entity?.nodeKey ?? action.ref ?? action.kind,
     };
   }
   if (action.kind === "meta_cli_operation") {
     return {
-      nodeType: (action.entity?.nodeType as NodeIdent["nodeType"] | undefined) ?? "campaign",
+      nodeType:
+        (action.entity?.nodeType as NodeIdent["nodeType"] | undefined) ??
+        "campaign",
       nodeKey: action.entity?.nodeKey ?? `${action.resource}:${action.verb}`,
     };
   }
   const legacy = action as LegacyApplyAction;
-  if (action.kind.endsWith("_campaign")) return { nodeType: "campaign", nodeKey: String(legacy.campaignId) };
-  if (action.kind.endsWith("_adset")) return { nodeType: "adset", nodeKey: String(legacy.adsetId) };
-  if (action.kind.endsWith("_ad")) return { nodeType: "ad", nodeKey: String(legacy.adId) };
-  if (action.kind.endsWith("_creative")) return { nodeType: "creative", nodeKey: String(legacy.creativeId) };
+  if (action.kind.endsWith("_campaign"))
+    return { nodeType: "campaign", nodeKey: String(legacy.campaignId) };
+  if (action.kind.endsWith("_adset"))
+    return { nodeType: "adset", nodeKey: String(legacy.adsetId) };
+  if (action.kind.endsWith("_ad"))
+    return { nodeType: "ad", nodeKey: String(legacy.adId) };
+  if (action.kind.endsWith("_creative"))
+    return { nodeType: "creative", nodeKey: String(legacy.creativeId) };
   return { nodeType: "campaign", nodeKey: action.kind };
 }
 
@@ -1593,7 +1665,7 @@ type RevalidationResult =
   | { ok: false; reason: RevalidationFailureReason; detail: string };
 
 export function evaluateApprovalSnapshot(
-  snapshot: ApplyApprovalSnapshot | null
+  snapshot: ApplyApprovalSnapshot | null,
 ): RevalidationResult {
   if (!snapshot) {
     return {
@@ -1685,7 +1757,7 @@ interface ReportOnlyAccountRecord {
 
 function collectReportOnlyAccounts(
   accountKeys: readonly string[],
-  context: AccountExecutionModes
+  context: AccountExecutionModes,
 ): ReportOnlyAccountRecord[] {
   const out: ReportOnlyAccountRecord[] = [];
   for (const key of accountKeys) {

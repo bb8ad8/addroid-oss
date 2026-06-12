@@ -25,7 +25,13 @@ import {
   type SubmissionGuardsYaml,
 } from "@addroid/ops-schemas";
 import { isManagedStorageKey } from "./storage-key-validation.js";
-export type PlanRunSource = "web" | "web-chat" | "slack-chat" | "agent-task" | "ci" | "cli";
+export type PlanRunSource =
+  | "web"
+  | "web-chat"
+  | "slack-chat"
+  | "agent-task"
+  | "ci"
+  | "cli";
 
 export interface PlanCounts {
   creates: number;
@@ -117,22 +123,38 @@ export function runPlanForRoot(input: PlanRunInput): PlanRunOutput {
   const perAccount: PerAccountPlanSummary[] = [];
   const accumulatedErrors: ValidationFinding[] = [];
   const accumulatedWarnings: ValidationFinding[] = [];
-  const grouped = new Map<string, { actions: OperationPlanAction[]; findings: PlanFinding[] }>();
+  const grouped = new Map<
+    string,
+    { actions: OperationPlanAction[]; findings: PlanFinding[] }
+  >();
   const submissionGuards =
-    loadSubmissionGuardsPolicy(input.rootDir) ?? DEFAULT_SUBMISSION_GUARDS_POLICY;
+    loadSubmissionGuardsPolicy(input.rootDir) ??
+    DEFAULT_SUBMISSION_GUARDS_POLICY;
   for (const file of findOperationFiles(input.rootDir)) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(fs.readFileSync(path.join(input.rootDir, file), "utf8"));
+      parsed = JSON.parse(
+        fs.readFileSync(path.join(input.rootDir, file), "utf8"),
+      );
     } catch (err) {
-      accumulatedErrors.push({ file, message: `operation manifest JSON を読めません: ${(err as Error).message}` });
+      accumulatedErrors.push({
+        file,
+        message: `operation manifest JSON を読めません: ${(err as Error).message}`,
+      });
       continue;
     }
     const normalized = normalizeOperationManifest(file, parsed);
     accumulatedErrors.push(...normalized.errors);
     accumulatedWarnings.push(...normalized.warnings);
-    if (!normalized.accountKey || (input.accountFilter && normalized.accountKey !== input.accountFilter)) continue;
-    const current = grouped.get(normalized.accountKey) ?? { actions: [], findings: [] };
+    if (
+      !normalized.accountKey ||
+      (input.accountFilter && normalized.accountKey !== input.accountFilter)
+    )
+      continue;
+    const current = grouped.get(normalized.accountKey) ?? {
+      actions: [],
+      findings: [],
+    };
     current.actions.push(...normalized.actions);
     current.findings.push(...normalized.findings);
     const guardFindings = evaluateSubmissionGuards({
@@ -168,7 +190,7 @@ export function runPlanForRoot(input: PlanRunInput): PlanRunOutput {
       errors: acc.errors + p.counts.errors,
       warnings: acc.warnings + p.counts.warnings,
     }),
-    { creates: 0, updates: 0, deletes: 0, errors: 0, warnings: 0 }
+    { creates: 0, updates: 0, deletes: 0, errors: 0, warnings: 0 },
   );
 
   const ok =
@@ -217,16 +239,13 @@ function evaluateSubmissionGuards(input: {
       if (check.previous <= 0) continue;
       const ratio = check.next / check.previous;
       if (!Number.isFinite(ratio) || ratio < 1) continue;
-      const summary =
-        `${check.label} ${formatBudgetNumber(check.previous)} -> ${formatBudgetNumber(check.next)} (${formatRatio(ratio)})`;
+      const summary = `${check.label} ${formatBudgetNumber(check.previous)} -> ${formatBudgetNumber(check.next)} (${formatRatio(ratio)})`;
       if (ratio >= budgetPolicy.blockOverRatio) {
-        const message =
-          `予算増加ガード: ${summary} はブロックライン ${formatRatio(budgetPolicy.blockOverRatio)} 以上です。`;
+        const message = `予算増加ガード: ${summary} はブロックライン ${formatRatio(budgetPolicy.blockOverRatio)} 以上です。`;
         errors.push({ file: input.file, pointer, message });
         findings.push({ level: "error", pointer, message });
       } else if (ratio >= budgetPolicy.warnOverRatio) {
-        const message =
-          `予算増加ガード: ${summary} は警告ライン ${formatRatio(budgetPolicy.warnOverRatio)} 以上です。`;
+        const message = `予算増加ガード: ${summary} は警告ライン ${formatRatio(budgetPolicy.warnOverRatio)} 以上です。`;
         warnings.push({ file: input.file, pointer, message });
         findings.push({ level: "warning", pointer, message });
       }
@@ -241,16 +260,23 @@ interface BudgetIncreaseCheck {
   next: number;
 }
 
-function budgetIncreaseChecks(action: OperationPlanAction): BudgetIncreaseCheck[] {
+function budgetIncreaseChecks(
+  action: OperationPlanAction,
+): BudgetIncreaseCheck[] {
   const out: BudgetIncreaseCheck[] = [];
   if (action.kind !== "graph_operation" || !action.payload) return out;
   if (action.verb !== "update") return out;
   if (action.resource !== "campaign" && action.resource !== "adset") return out;
   const payload = action.payload;
-  const graphPayload = isRecord(payload.graphPayload) ? payload.graphPayload : {};
-  const guardContext = isRecord(payload.guardContext) ? payload.guardContext : {};
+  const graphPayload = isRecord(payload.graphPayload)
+    ? payload.graphPayload
+    : {};
+  const guardContext = isRecord(payload.guardContext)
+    ? payload.guardContext
+    : {};
   const dailyNext =
-    readFiniteNumber(payload.dailyBudget) ?? readFiniteNumber(graphPayload.daily_budget);
+    readFiniteNumber(payload.dailyBudget) ??
+    readFiniteNumber(graphPayload.daily_budget);
   if (dailyNext !== null) {
     out.push({
       label: `${action.resource}.dailyBudget`,
@@ -264,7 +290,8 @@ function budgetIncreaseChecks(action: OperationPlanAction): BudgetIncreaseCheck[
     });
   }
   const lifetimeNext =
-    readFiniteNumber(payload.lifetimeBudget) ?? readFiniteNumber(graphPayload.lifetime_budget);
+    readFiniteNumber(payload.lifetimeBudget) ??
+    readFiniteNumber(graphPayload.lifetime_budget);
   if (lifetimeNext !== null) {
     out.push({
       label: `${action.resource}.lifetimeBudget`,
@@ -280,7 +307,10 @@ function budgetIncreaseChecks(action: OperationPlanAction): BudgetIncreaseCheck[
   return out;
 }
 
-function readNestedNumber(root: Record<string, unknown>, pathParts: string[]): number | null {
+function readNestedNumber(
+  root: Record<string, unknown>,
+  pathParts: string[],
+): number | null {
   let current: unknown = root;
   for (const part of pathParts) {
     if (!isRecord(current)) return null;
@@ -303,19 +333,27 @@ function formatRatio(value: number): string {
 }
 
 function formatBudgetNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+  return Number.isInteger(value)
+    ? String(value)
+    : String(Number(value.toFixed(2)));
 }
 
 function countActions(
   actions: readonly OperationPlanAction[],
-  findings: readonly PlanFinding[]
+  findings: readonly PlanFinding[],
 ): PlanCounts {
   let creates = 0;
   let updates = 0;
   let deletes = 0;
   for (const a of actions) {
     if (a.verb === "create") creates += 1;
-    else if (a.verb === "update" || a.verb === "connect" || a.verb === "disconnect" || a.verb === "assign-user") updates += 1;
+    else if (
+      a.verb === "update" ||
+      a.verb === "connect" ||
+      a.verb === "disconnect" ||
+      a.verb === "assign-user"
+    )
+      updates += 1;
     else if (a.verb === "delete" || a.verb === "status_delete") deletes += 1;
   }
   let errors = 0;
@@ -346,7 +384,7 @@ function findOperationFiles(rootDir: string): string[] {
 
 function normalizeOperationManifest(
   file: string,
-  value: unknown
+  value: unknown,
 ): {
   accountKey: string | null;
   actions: OperationPlanAction[];
@@ -355,7 +393,13 @@ function normalizeOperationManifest(
   warnings: ValidationFinding[];
 } {
   if (!isRecord(value)) {
-    return { accountKey: null, actions: [], findings: [], errors: [{ file, message: "operation manifest must be an object" }], warnings: [] };
+    return {
+      accountKey: null,
+      actions: [],
+      findings: [],
+      errors: [{ file, message: "operation manifest must be an object" }],
+      warnings: [],
+    };
   }
   const accountKey = readString(value.accountKey);
   const errors: ValidationFinding[] = [];
@@ -364,12 +408,17 @@ function normalizeOperationManifest(
   const actions: OperationPlanAction[] = [];
   if (!accountKey) errors.push({ file, message: "accountKey is required" });
   const rawActions = Array.isArray(value.actions) ? value.actions : [];
-  if (rawActions.length === 0) errors.push({ file, message: "actions[] is required" });
+  if (rawActions.length === 0)
+    errors.push({ file, message: "actions[] is required" });
   const version = value.version === 2 ? 2 : 1;
   rawActions.forEach((raw, index) => {
     const pointer = `/actions/${index}`;
     if (!isRecord(raw)) {
-      errors.push({ file, pointer, message: "operation action must be an object" });
+      errors.push({
+        file,
+        pointer,
+        message: "operation action must be an object",
+      });
       return;
     }
     if (version === 2) {
@@ -388,10 +437,15 @@ function normalizeOperationManifest(
         findings.push({ level: "error", pointer, message });
         return;
       }
-      const graphPayload = isRecord(payload.graphPayload) ? payload.graphPayload : {};
-      const status = (readString(payload.status) ?? readString(graphPayload.status))?.toUpperCase();
+      const graphPayload = isRecord(payload.graphPayload)
+        ? payload.graphPayload
+        : {};
+      const status = (
+        readString(payload.status) ?? readString(graphPayload.status)
+      )?.toUpperCase();
       if (verb === "create" && status === "ACTIVE") {
-        const message = "apply phase cannot create ACTIVE Meta objects; use PAUSED then audited activate flow";
+        const message =
+          "apply phase cannot create ACTIVE Meta objects; use PAUSED then audited activate flow";
         errors.push({ file, pointer, message });
         findings.push({ level: "error", pointer, message });
         return;
@@ -402,6 +456,12 @@ function normalizeOperationManifest(
           "storageKey must be a managed AdDroid storage key; local file paths must be imported before creating an ops PR";
         errors.push({ file, pointer, message });
         findings.push({ level: "error", pointer, message });
+        return;
+      }
+      const carouselError = validateCarouselCreativePayload(payload, raw);
+      if (carouselError) {
+        errors.push({ file, pointer, message: carouselError });
+        findings.push({ level: "error", pointer, message: carouselError });
         return;
       }
       actions.push({
@@ -418,9 +478,17 @@ function normalizeOperationManifest(
     }
     const resource = readString(raw.resource);
     const verb = readString(raw.verb);
-    const args = Array.isArray(raw.args) ? raw.args.filter((v): v is string => typeof v === "string" && v.length > 0) : [];
+    const args = Array.isArray(raw.args)
+      ? raw.args.filter(
+          (v): v is string => typeof v === "string" && v.length > 0,
+        )
+      : [];
     if (!resource || !verb || args.length === 0) {
-      errors.push({ file, pointer, message: "operation action requires resource, verb and args[]" });
+      errors.push({
+        file,
+        pointer,
+        message: "operation action requires resource, verb and args[]",
+      });
       return;
     }
     const support = isSupportedMetaCliOperation(args);
@@ -432,8 +500,7 @@ function normalizeOperationManifest(
     }
     const invalidStorageFlag = findInvalidStorageFlag(args);
     if (invalidStorageFlag) {
-      const message =
-        `${invalidStorageFlag.flag} must be a managed AdDroid storage key; local file paths must be imported before creating an ops PR`;
+      const message = `${invalidStorageFlag.flag} must be a managed AdDroid storage key; local file paths must be imported before creating an ops PR`;
       errors.push({ file, pointer, message });
       findings.push({ level: "error", pointer, message });
       return;
@@ -471,12 +538,64 @@ function isSupportedGraphOperationKind(kind: string): boolean {
   return GRAPH_OPERATION_KINDS.has(kind);
 }
 
+function validateCarouselCreativePayload(
+  payload: Record<string, unknown>,
+  raw: Record<string, unknown>,
+): string | null {
+  const creative = isRecord(payload.creative)
+    ? payload.creative
+    : isRecord(raw.creative)
+      ? raw.creative
+      : null;
+  const mediaType =
+    readString(payload.mediaType)?.toLowerCase() ??
+    readString(payload.type)?.toLowerCase();
+  const isCarousel =
+    mediaType === "carousel" ||
+    readString(creative?.type)?.toLowerCase() === "carousel";
+  if (!isCarousel) return null;
+  const cards = Array.isArray(payload.cards)
+    ? payload.cards
+    : Array.isArray(creative?.cards)
+      ? creative.cards
+      : [];
+  if (cards.length < 2 || cards.length > 10) {
+    return "carousel creative requires 2-10 cards";
+  }
+  for (let i = 0; i < cards.length; i += 1) {
+    const card = cards[i];
+    if (!isRecord(card)) return `carousel card ${i + 1} must be an object`;
+    const storageKey =
+      readString(card.storageKey) ??
+      readString(card.storage_key) ??
+      storageKeyFromStorageRef(
+        readString(card.storageRef) ?? readString(card.storage_ref),
+      );
+    if (!storageKey)
+      return `carousel card ${i + 1} requires storage_ref or storageKey`;
+    if (!isManagedStorageKey(storageKey)) {
+      return "carousel card storage_ref must be a managed AdDroid storage key";
+    }
+    if (!readString(card.headline))
+      return `carousel card ${i + 1} requires headline`;
+  }
+  return null;
+}
+
+function storageKeyFromStorageRef(value: string | null): string | null {
+  if (!value) return null;
+  const prefix = "storage://";
+  return value.startsWith(prefix)
+    ? readString(value.slice(prefix.length))
+    : value;
+}
+
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function findInvalidStorageFlag(
-  args: readonly string[]
+  args: readonly string[],
 ): { flag: string; value: string } | null {
   for (const flag of ["--image", "--video", "--images", "--videos"]) {
     for (let i = 0; i < args.length - 1; i += 1) {
@@ -524,7 +643,7 @@ export interface RecordPlanExecutionLogInput {
 
 export interface PlanRunStore {
   recordPlanExecutionLog(
-    input: RecordPlanExecutionLogInput
+    input: RecordPlanExecutionLogInput,
   ): Promise<{ id: string }>;
 }
 
@@ -539,7 +658,7 @@ export function createPrismaPlanStore(prisma: PrismaClient): PlanRunStore {
           refId: null,
           level: input.level,
           message: input.message,
-          payload: (input.payload as unknown) as Prisma.InputJsonValue,
+          payload: input.payload as unknown as Prisma.InputJsonValue,
         },
         select: { id: true },
       });
@@ -564,12 +683,20 @@ export interface PersistPlanRunInput {
  * level は overall risk から決め、message は人間可読な短いサマリ。
  */
 export async function persistPlanRun(
-  input: PersistPlanRunInput
+  input: PersistPlanRunInput,
 ): Promise<{ id: string }> {
   const { result } = input;
   const level: "info" | "warn" | "error" =
-    result.risk === "error" ? "error" : result.risk === "warn" ? "warn" : "info";
-  const message = formatSummaryMessage(input.source, result, input.accountFilter ?? null);
+    result.risk === "error"
+      ? "error"
+      : result.risk === "warn"
+        ? "warn"
+        : "info";
+  const message = formatSummaryMessage(
+    input.source,
+    result,
+    input.accountFilter ?? null,
+  );
   const payload: PlanRunPayloadJson = {
     source: input.source,
     triggeredBy: input.triggeredBy,
@@ -595,7 +722,7 @@ export async function persistPlanRun(
 function formatSummaryMessage(
   source: PlanRunSource,
   result: PlanRunOutput,
-  accountFilter: string | null
+  accountFilter: string | null,
 ): string {
   const scope =
     accountFilter !== null

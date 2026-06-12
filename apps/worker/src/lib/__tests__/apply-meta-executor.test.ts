@@ -78,7 +78,11 @@ class FakeChildProcess extends EventEmitter {
 }
 
 function makeSpawn(scripts: ScriptedRun[], log: SpawnLog[]) {
-  return ((cmd: string, args?: readonly string[], opts?: Record<string, unknown>) => {
+  return ((
+    cmd: string,
+    args?: readonly string[],
+    opts?: Record<string, unknown>,
+  ) => {
     log.push({
       command: cmd,
       args: args ? Array.from(args) : [],
@@ -105,7 +109,10 @@ function makeSpawn(scripts: ScriptedRun[], log: SpawnLog[]) {
 
 const TOKEN = "EAA-test-token-1234567890ABCDEFGHIJ";
 const META_ADAPTER: MetaAdapter = {
-  beginOAuth: async (): Promise<MetaBeginOAuthResult> => ({ authorizationUrl: "", state: "" }),
+  beginOAuth: async (): Promise<MetaBeginOAuthResult> => ({
+    authorizationUrl: "",
+    state: "",
+  }),
   completeOAuth: async (): Promise<MetaOAuthConnection> => {
     throw new Error("not used");
   },
@@ -122,9 +129,7 @@ const META_ADAPTER: MetaAdapter = {
   fetchAdAccounts: async (): Promise<MetaAdAccount[]> => [],
 };
 
-function ctx(
-  overrides: Partial<ApplyJobContext> = {}
-): ApplyJobContext {
+function ctx(overrides: Partial<ApplyJobContext> = {}): ApplyJobContext {
   return {
     applyJobId: "apply-1",
     pullRequestId: "pr-row-1",
@@ -150,27 +155,35 @@ function assertCanonicalPreSpawnEnvelope(
     exitClass: "auth_error" | "unknown_error";
     stderrIncludes?: string;
     accountKey: string;
-  }
+  },
 ) {
   assert.equal(payload.exitClass, expected.exitClass);
   assert.equal(payload.exitCode, null, "pre-spawn exitCode must be null");
   assert.equal(payload.signal, null, "pre-spawn signal must be null");
   assert.equal(payload.stdout, "", "pre-spawn stdout must be empty");
-  assert.equal(typeof payload.stderr, "string", "pre-spawn stderr must be string");
+  assert.equal(
+    typeof payload.stderr,
+    "string",
+    "pre-spawn stderr must be string",
+  );
   if (expected.stderrIncludes !== undefined) {
     assert.ok(
       (payload.stderr as string).includes(expected.stderrIncludes),
-      `pre-spawn stderr should mention "${expected.stderrIncludes}"`
+      `pre-spawn stderr should mention "${expected.stderrIncludes}"`,
     );
   }
   assert.equal(payload.timedOut, false, "pre-spawn timedOut must be false");
   assert.equal(payload.durationMs, 0, "pre-spawn durationMs must be 0");
   assert.equal(typeof payload.startedAt, "string");
   assert.equal(typeof payload.finishedAt, "string");
-  assert.equal(payload.throttleHeaders, null, "pre-spawn throttleHeaders must be null");
+  assert.equal(
+    payload.throttleHeaders,
+    null,
+    "pre-spawn throttleHeaders must be null",
+  );
   assert.ok(
     payload.recommendedAction && typeof payload.recommendedAction === "object",
-    "pre-spawn recommendedAction must be present"
+    "pre-spawn recommendedAction must be present",
   );
   assert.equal(payload.accountKey, expected.accountKey);
 }
@@ -210,7 +223,7 @@ test("CliApplyExecutor.executeAction: success uses MetaCliRunner.run and toExecu
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -232,9 +245,9 @@ test("CliApplyExecutor.executeAction: success uses MetaCliRunner.run and toExecu
   assert.equal(typeof payload.sanitizedCommand, "string");
   assert.ok(
     (payload.sanitizedCommand as string).startsWith(
-      "/usr/local/bin/meta-ads-cli ads campaign create"
+      "/usr/local/bin/meta-ads-cli ads campaign create",
     ),
-    "sanitizedCommand should start with binary + resource verb"
+    "sanitizedCommand should start with binary + resource verb",
   );
   assert.ok(Array.isArray(payload.sanitizedArgs));
   const sanitizedArgs = payload.sanitizedArgs as string[];
@@ -264,9 +277,10 @@ test("CliApplyExecutor.executeAction: success uses MetaCliRunner.run and toExecu
   assert.equal(firstSpawn.command, "/usr/local/bin/meta-ads-cli");
   assert.ok(
     !firstSpawn.args.some((a) => a.includes(TOKEN)),
-    "access token must not appear in argv"
+    "access token must not appear in argv",
   );
-  const spawnedEnv = (firstSpawn.options as { env?: Record<string, string> }).env ?? {};
+  const spawnedEnv =
+    (firstSpawn.options as { env?: Record<string, string> }).env ?? {};
   assert.equal(spawnedEnv.ACCESS_TOKEN, TOKEN);
   assert.equal(spawnedEnv.AD_ACCOUNT_ID, "primary");
   assert.equal(spawnedEnv.META_ACCESS_TOKEN, undefined);
@@ -307,7 +321,7 @@ test("CliApplyExecutor.executeAction: create_campaign success extracts externalI
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -329,7 +343,7 @@ test("CliApplyExecutor.executeAction: create_adset success extracts numeric id f
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -359,7 +373,7 @@ test("CliApplyExecutor.executeAction: create_* success without parseable id leav
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -382,11 +396,12 @@ test("CliApplyExecutor.executeAction: auth_error maps status and surfaces reauth
     [
       {
         stdout: "",
-        stderr: '{"error":{"message":"Error validating access token","code":190}}',
+        stderr:
+          '{"error":{"message":"Error validating access token","code":190}}',
         exitCode: 2,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -405,7 +420,10 @@ test("CliApplyExecutor.executeAction: auth_error maps status and surfaces reauth
   assert.equal(result.retry, undefined);
   // regression fix: production caller drives notification audit off the
   // recommendedAction by exposing `notify` on ExecuteActionResult.
-  assert.ok(result.notify, "auth_error must expose a notify hint for the orchestrator");
+  assert.ok(
+    result.notify,
+    "auth_error must expose a notify hint for the orchestrator",
+  );
   assert.equal(result.notify!.auditAction, "oauth.meta.reauth_required");
 });
 
@@ -424,7 +442,7 @@ test("CliApplyExecutor.executeAction: api_error maps to api_error status with me
         exitCode: 5,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -442,7 +460,10 @@ test("CliApplyExecutor.executeAction: api_error maps to api_error status with me
 
   // production caller must NOT retry api_error — the notification path runs instead.
   assert.equal(result.retry, undefined);
-  assert.ok(result.notify, "api_error must expose a notify hint for the orchestrator");
+  assert.ok(
+    result.notify,
+    "api_error must expose a notify hint for the orchestrator",
+  );
   assert.equal(result.notify!.auditAction, "meta.api_error");
 });
 
@@ -460,7 +481,7 @@ test("CliApplyExecutor.executeAction: unknown_error attaches meta.cli_unknown_er
         exitCode: 139,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -471,7 +492,10 @@ test("CliApplyExecutor.executeAction: unknown_error attaches meta.cli_unknown_er
 
   assert.equal(result.status, "unknown_error");
   assert.equal(result.retry, undefined);
-  assert.ok(result.notify, "unknown_error must expose a notify hint for the orchestrator");
+  assert.ok(
+    result.notify,
+    "unknown_error must expose a notify hint for the orchestrator",
+  );
   assert.equal(result.notify!.auditAction, "meta.cli_unknown_error");
 });
 
@@ -489,7 +513,7 @@ test("CliApplyExecutor.executeAction: rate_limit_error attaches exponential back
         exitCode: 3,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -510,55 +534,86 @@ test("CliApplyExecutor.executeAction: rate_limit_error attaches exponential back
 });
 
 test("CliApplyExecutor.executeAction: create_creative uses Graph instagram_user_id and rewrites following ad creativeRef", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "addroid-creative-test-"));
+  const tmp = await fs.mkdtemp(
+    path.join(os.tmpdir(), "addroid-creative-test-"),
+  );
   const prevAddroidHome = process.env.ADDROID_HOME;
   process.env.ADDROID_HOME = tmp;
-  const storageKey = "creative-submissions/act_786887980003986/cr-1/creative.png";
+  const storageKey =
+    "creative-submissions/act_786887980003986/cr-1/creative.png";
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   try {
     await new LocalDiskStorage({ env: process.env }).write(
       storageKey,
-      Buffer.from("not-a-real-png")
+      Buffer.from("not-a-real-png"),
     );
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body });
       if (url.includes("/instagram_accounts")) {
-        return Response.json({ data: [{ id: "17841465387326763", username: "sin" }] });
+        return Response.json({
+          data: [{ id: "17841465387326763", username: "sin" }],
+        });
       }
       if (url.includes("/281900655012835?")) {
         return Response.json(
-          { error: { code: 200, message: "page role not readable in this token" } },
-          { status: 403 }
+          {
+            error: {
+              code: 200,
+              message: "page role not readable in this token",
+            },
+          },
+          { status: 403 },
         );
       }
       if (url.includes("/adsets?")) {
         return Response.json({
-          data: [{ id: "as-1", promoted_object: { page_id: "281900655012835" } }],
+          data: [
+            { id: "as-1", promoted_object: { page_id: "281900655012835" } },
+          ],
         });
       }
       if (url.includes("/adimages")) {
-        return Response.json({ images: { "creative.png": { hash: "img-hash-1" } } });
+        return Response.json({
+          images: { "creative.png": { hash: "img-hash-1" } },
+        });
       }
       if (url.includes("/adcreatives")) {
         const params = new URLSearchParams(String(init?.body ?? ""));
-        const spec = JSON.parse(params.get("object_story_spec") ?? "{}") as Record<string, unknown>;
+        const spec = JSON.parse(
+          params.get("object_story_spec") ?? "{}",
+        ) as Record<string, unknown>;
         const linkData = spec.link_data as Record<string, unknown>;
         const cta = linkData.call_to_action as Record<string, unknown>;
         const ctaValue = cta.value as Record<string, unknown>;
         assert.equal(spec.instagram_user_id, "17841465387326763");
-        assert.equal(Object.prototype.hasOwnProperty.call(spec, "instagram_actor_id"), false);
+        assert.equal(
+          Object.prototype.hasOwnProperty.call(spec, "instagram_actor_id"),
+          false,
+        );
         assert.equal(cta.type, "VIEW_INSTAGRAM_PROFILE");
-        assert.equal(ctaValue.app_link, "instagram://user?username=sin&userid=65414107577");
+        assert.equal(
+          ctaValue.app_link,
+          "instagram://user?username=sin&userid=65414107577",
+        );
         return Response.json({ id: "999000111222333" });
       }
-      return Response.json({ error: { code: 100, message: "unexpected" } }, { status: 400 });
+      return Response.json(
+        { error: { code: 100, message: "unexpected" } },
+        { status: 400 },
+      );
     }) as typeof fetch;
 
     const log: SpawnLog[] = [];
-    const runner = makeRunner([{ stdout: '{"id":"1200000000001"}\n', stderr: "", exitCode: 0 }], log);
+    const runner = makeRunner(
+      [{ stdout: '{"id":"1200000000001"}\n', stderr: "", exitCode: 0 }],
+      log,
+    );
     const executor = new CliApplyExecutor({
       runner,
       metaAdapter: META_ADAPTER,
@@ -588,11 +643,15 @@ test("CliApplyExecutor.executeAction: create_creative uses Graph instagram_user_
     const creativePayload = creative.logPayload as Record<string, unknown>;
     assert.deepEqual(
       (creativePayload.sanitizedArgs as string[]).filter((arg) =>
-        arg.startsWith("--instagram-")
+        arg.startsWith("--instagram-"),
       ),
-      ["--instagram-actor-id"]
+      ["--instagram-actor-id"],
     );
-    assert.equal(log.length, 0, "create_creative should not spawn the legacy CLI");
+    assert.equal(
+      log.length,
+      0,
+      "create_creative should not spawn the legacy CLI",
+    );
 
     const ad = await executor.executeAction({
       action: {
@@ -611,10 +670,10 @@ test("CliApplyExecutor.executeAction: create_creative uses Graph instagram_user_
     assert.equal(ad.status, "success");
     assert.equal(log.length, 1);
     const creativeFlagIndex = log[0]!.args.indexOf("--creative-id");
-    assert.deepEqual(log[0]!.args.slice(creativeFlagIndex, creativeFlagIndex + 2), [
-      "--creative-id",
-      "999000111222333",
-    ]);
+    assert.deepEqual(
+      log[0]!.args.slice(creativeFlagIndex, creativeFlagIndex + 2),
+      ["--creative-id", "999000111222333"],
+    );
     assert.ok(calls.some((call) => call.url.includes("/adcreatives")));
   } finally {
     globalThis.fetch = originalFetch;
@@ -653,12 +712,19 @@ test("CliApplyExecutor.executeAction: create_creative rejects absolute storageKe
     });
 
     assert.equal(result.status, "api_error");
-    assert.equal(log.length, 0, "invalid storageKey must not spawn the legacy CLI");
+    assert.equal(
+      log.length,
+      0,
+      "invalid storageKey must not spawn the legacy CLI",
+    );
     const payload = result.logPayload as Record<string, unknown>;
     assert.equal(payload.stage, "plan_args");
     assert.equal(payload.reason, "invalid_storage_key");
     assert.equal(payload.actionKind, "create_creative");
-    assert.ok(result.notify, "invalid storageKey should notify as a Meta API input error");
+    assert.ok(
+      result.notify,
+      "invalid storageKey should notify as a Meta API input error",
+    );
     assert.equal(result.notify!.auditAction, "meta.api_error");
   } finally {
     globalThis.fetch = originalFetch;
@@ -669,7 +735,7 @@ test("CliApplyExecutor.executeAction: meta_cli_operation uses canonical instagra
   const log: SpawnLog[] = [];
   const runner = makeRunner(
     [{ stdout: '{"id":"999000111222333"}\n', stderr: "", exitCode: 0 }],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
 
@@ -727,7 +793,11 @@ test("CliApplyExecutor.executeAction: meta_cli_operation rejects absolute media 
   });
 
   assert.equal(result.status, "api_error");
-  assert.equal(log.length, 0, "invalid media flag must not spawn the legacy CLI");
+  assert.equal(
+    log.length,
+    0,
+    "invalid media flag must not spawn the legacy CLI",
+  );
   const payload = result.logPayload as Record<string, unknown>;
   assert.equal(payload.reason, "invalid_storage_key");
   assert.equal(payload.actionKind, "meta_cli_operation");
@@ -779,7 +849,7 @@ test("CliApplyExecutor.executeAction: tokens echoed by CLI are redacted in logPa
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -790,11 +860,14 @@ test("CliApplyExecutor.executeAction: tokens echoed by CLI are redacted in logPa
 
   const payload = result.logPayload as Record<string, unknown>;
   const stdout = payload.stdout as string;
-  assert.ok(!stdout.includes(TOKEN), "raw token must never appear in logPayload.stdout");
+  assert.ok(
+    !stdout.includes(TOKEN),
+    "raw token must never appear in logPayload.stdout",
+  );
   assert.ok(stdout.includes("[REDACTED]"), "stdout should be redacted");
   assert.ok(
     !(payload.sanitizedCommand as string).includes(TOKEN),
-    "sanitizedCommand must never include token"
+    "sanitizedCommand must never include token",
   );
 });
 
@@ -817,7 +890,9 @@ test("MockApplyExecutor: returns success with sanitized mock command in logPaylo
   assert.equal(payload.verb, "create");
   assert.ok(typeof payload.sanitizedCommand === "string");
   assert.ok(
-    (payload.sanitizedCommand as string).startsWith("meta-ads-cli ads campaign create")
+    (payload.sanitizedCommand as string).startsWith(
+      "meta-ads-cli ads campaign create",
+    ),
   );
 });
 
@@ -838,7 +913,7 @@ test("MockApplyExecutor: create_campaign success surfaces a deterministic mocked
   assert.equal(typeof result.externalId, "string");
   assert.ok(
     (result.externalId ?? "").length > 0,
-    "create_* mock must surface a non-empty externalId"
+    "create_* mock must surface a non-empty externalId",
   );
   // 同じ action で 2 回呼んでも同じ id を返す (決定的)。
   const again = await executor.executeAction({
@@ -867,7 +942,7 @@ test("MockApplyExecutor: create_adset / create_ad / create_creative all surface 
   assert.equal(adsetResult.status, "success");
   assert.ok(
     nonEmpty(adsetResult.externalId),
-    "create_adset mock must surface a non-empty externalId"
+    "create_adset mock must surface a non-empty externalId",
   );
 
   const adResult = await executor.executeAction({
@@ -887,7 +962,7 @@ test("MockApplyExecutor: create_adset / create_ad / create_creative all surface 
   assert.equal(adResult.status, "success");
   assert.ok(
     nonEmpty(adResult.externalId),
-    "create_ad mock must surface a non-empty externalId"
+    "create_ad mock must surface a non-empty externalId",
   );
 
   const creativeResult = await executor.executeAction({
@@ -904,7 +979,7 @@ test("MockApplyExecutor: create_adset / create_ad / create_creative all surface 
   assert.equal(creativeResult.status, "success");
   assert.ok(
     nonEmpty(creativeResult.externalId),
-    "create_creative mock surfaces an externalId for observability"
+    "create_creative mock surfaces an externalId for observability",
   );
 });
 
@@ -919,23 +994,21 @@ function nonEmpty(s: string | undefined): boolean {
 test("extractExternalIdFromCliStdout: extracts id field from a single-line JSON object", () => {
   assert.equal(
     extractExternalIdFromCliStdout('{"id":"act_1/cmp_42"}\n'),
-    "act_1/cmp_42"
+    "act_1/cmp_42",
   );
 });
 
 test("extractExternalIdFromCliStdout: extracts numeric id field as string", () => {
   assert.equal(
     extractExternalIdFromCliStdout('{"id":1234567890}\n'),
-    "1234567890"
+    "1234567890",
   );
 });
 
 test("extractExternalIdFromCliStdout: prefers externalId over id when both are present", () => {
   assert.equal(
-    extractExternalIdFromCliStdout(
-      '{"externalId":"ext_1","id":"raw_1"}\n'
-    ),
-    "ext_1"
+    extractExternalIdFromCliStdout('{"externalId":"ext_1","id":"raw_1"}\n'),
+    "ext_1",
   );
 });
 
@@ -963,7 +1036,7 @@ test("extractExternalIdFromCliStdout: empty / non-id stdout yields undefined (ca
   assert.equal(extractExternalIdFromCliStdout("ok\n"), undefined);
   assert.equal(
     extractExternalIdFromCliStdout('{"name":"no id here"}\n'),
-    undefined
+    undefined,
   );
 });
 
@@ -1012,15 +1085,19 @@ class FakeMetaAdapter implements MetaAdapter {
   }
 }
 
-async function makeDiagnosticCliExecutor(opts: {
-  lease?: MetaAccessTokenLease | null;
-  versionResolver?: () => Promise<string>;
-} = {}): Promise<CliApplyExecutor> {
+async function makeDiagnosticCliExecutor(
+  opts: {
+    lease?: MetaAccessTokenLease | null;
+    versionResolver?: () => Promise<string>;
+  } = {},
+): Promise<CliApplyExecutor> {
   const runner = new MetaCliRunner({
     binaryPath: "/usr/local/bin/meta-ads-cli",
     spawnImpl: makeSpawn([], []),
     loadTokenForAccount: async () =>
-      opts.lease === null ? null : { accessToken: opts.lease?.accessToken ?? TOKEN },
+      opts.lease === null
+        ? null
+        : { accessToken: opts.lease?.accessToken ?? TOKEN },
     baseEnv: { PATH: "/usr/bin" } as NodeJS.ProcessEnv,
     minVersion: "0.5.0",
     versionResolver: opts.versionResolver ?? (async () => "meta-ads-cli 0.5.0"),
@@ -1029,12 +1106,14 @@ async function makeDiagnosticCliExecutor(opts: {
   await runner.verifyVersion();
   return new CliApplyExecutor({
     runner,
-    metaAdapter: new FakeMetaAdapter(opts.lease ?? {
-      accessToken: TOKEN,
-      scopes: ["ads_management"],
-      expiresAt: null,
-      accountIdentifier: "primary",
-    }),
+    metaAdapter: new FakeMetaAdapter(
+      opts.lease ?? {
+        accessToken: TOKEN,
+        scopes: ["ads_management"],
+        expiresAt: null,
+        accountIdentifier: "primary",
+      },
+    ),
   });
 }
 
@@ -1077,12 +1156,19 @@ test("GraphApplyExecutor passes graphPayload through, resolves nested refs, and 
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; body: URLSearchParams }> = [];
   try {
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       const url = String(input);
       calls.push({ url, body: new URLSearchParams(String(init?.body ?? "")) });
-      if (url.includes("/campaigns")) return Response.json({ id: "cmp_meta_1" });
+      if (url.includes("/campaigns"))
+        return Response.json({ id: "cmp_meta_1" });
       if (url.includes("/adsets")) return Response.json({ id: "as_meta_1" });
-      return Response.json({ error: { code: 100, message: "unexpected" } }, { status: 400 });
+      return Response.json(
+        { error: { code: 100, message: "unexpected" } },
+        { status: 400 },
+      );
     }) as typeof fetch;
 
     const executor = new GraphApplyExecutor({
@@ -1106,7 +1192,9 @@ test("GraphApplyExecutor passes graphPayload through, resolves nested refs, and 
       attempt: 0,
     });
     assert.equal(campaign.status, "success");
-    const campaignBody = calls.find((call) => call.url.includes("/campaigns"))!.body;
+    const campaignBody = calls.find((call) =>
+      call.url.includes("/campaigns"),
+    )!.body;
     assert.equal(campaignBody.get("objective"), "OUTCOME_TRAFFIC");
     assert.equal(campaignBody.has("buying_type"), false);
     assert.equal(campaignBody.has("special_ad_categories"), false);
@@ -1150,6 +1238,171 @@ test("GraphApplyExecutor passes graphPayload through, resolves nested refs, and 
   }
 });
 
+test("GraphApplyExecutor creates carousel creative then PAUSED ad in mutation order", async () => {
+  const tmp = await fs.mkdtemp(
+    path.join(os.tmpdir(), "addroid-carousel-apply-"),
+  );
+  const prevAddroidHome = process.env.ADDROID_HOME;
+  process.env.ADDROID_HOME = tmp;
+  const storage = new LocalDiskStorage({ env: process.env });
+  await storage.write(
+    "creatives/primary/carousel-1/card-1.png",
+    Buffer.from("card-1"),
+  );
+  await storage.write(
+    "creatives/primary/carousel-1/card-2.png",
+    Buffer.from("card-2"),
+  );
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; body?: unknown }> = [];
+  let imageUploadCount = 0;
+  try {
+    globalThis.fetch = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body });
+      if (url.includes("/instagram_accounts")) {
+        return Response.json({ data: [] });
+      }
+      if (url.includes("/281900655012835?")) {
+        return Response.json({ id: "281900655012835", name: "Page" });
+      }
+      if (url.includes("/adsets?")) {
+        return Response.json({ data: [] });
+      }
+      if (url.includes("/adimages")) {
+        imageUploadCount += 1;
+        return Response.json({
+          images: {
+            [`card-${imageUploadCount}.png`]: {
+              hash: `hash-${imageUploadCount}`,
+            },
+          },
+        });
+      }
+      if (url.includes("/adcreatives")) {
+        const params = new URLSearchParams(String(init?.body ?? ""));
+        const spec = JSON.parse(
+          params.get("object_story_spec") ?? "{}",
+        ) as Record<string, unknown>;
+        const linkData = spec.link_data as Record<string, unknown>;
+        const children = linkData.child_attachments as Array<
+          Record<string, unknown>
+        >;
+        assert.equal(children.length, 2);
+        assert.deepEqual(
+          children.map((child) => child.image_hash),
+          ["hash-1", "hash-2"],
+        );
+        assert.deepEqual(
+          children.map((child) => child.name),
+          ["Hook card", "CTA card"],
+        );
+        assert.equal(children[0]!.link, "https://example.com/1");
+        assert.equal(children[1]!.link, "https://example.com");
+        return Response.json({ id: "cr_meta_1" });
+      }
+      if (/\/act_123\/ads(?:$|\?)/.test(url)) {
+        const params = new URLSearchParams(String(init?.body ?? ""));
+        assert.equal(params.get("status"), "PAUSED");
+        assert.deepEqual(JSON.parse(params.get("creative") ?? "{}"), {
+          creative_id: "cr_meta_1",
+        });
+        return Response.json({ id: "ad_meta_1" });
+      }
+      return Response.json(
+        { error: { code: 100, message: `unexpected ${url}` } },
+        { status: 400 },
+      );
+    }) as typeof fetch;
+
+    const executor = new GraphApplyExecutor({
+      metaAdapter: META_ADAPTER,
+      resolveAdAccountId: async () => "act_123",
+    });
+    const creative = await executor.executeAction({
+      action: {
+        kind: "creative.create",
+        account: "primary",
+        ref: "creative:carousel-1",
+        payload: {
+          creativeId: "carousel-1",
+          name: "Carousel 1",
+          pageId: "281900655012835",
+          mediaType: "carousel",
+          linkUrl: "https://example.com",
+          primaryText: "main message",
+          cards: [
+            {
+              storageKey: "creatives/primary/carousel-1/card-1.png",
+              headline: "Hook card",
+              description: "first",
+              linkUrl: "https://example.com/1",
+            },
+            {
+              storageKey: "creatives/primary/carousel-1/card-2.png",
+              headline: "CTA card",
+              description: "second",
+            },
+          ],
+        },
+      },
+      context: ctx(),
+      attempt: 0,
+    });
+    assert.equal(creative.status, "success");
+    assert.equal(creative.externalId, "cr_meta_1");
+
+    const ad = await executor.executeAction({
+      action: {
+        kind: "ad.create",
+        account: "primary",
+        payload: {
+          adId: "ad-1",
+          adsetId: "as-1",
+          name: "Carousel Ad",
+          creativeRef: "{{creative:carousel-1}}",
+        },
+      },
+      context: ctx(),
+      attempt: 0,
+    });
+    assert.equal(ad.status, "success");
+    assert.equal(ad.externalId, "ad_meta_1");
+
+    const mutationOrder = calls
+      .filter((call) => call.method === "POST")
+      .map((call) => call.url)
+      .filter(
+        (url) =>
+          url.includes("/adimages") ||
+          url.includes("/adcreatives") ||
+          /\/act_123\/ads(?:$|\?)/.test(url),
+      )
+      .map((url) =>
+        url.includes("/adimages")
+          ? "adimages"
+          : url.includes("/adcreatives")
+            ? "adcreatives"
+            : "ads",
+      );
+    assert.deepEqual(mutationOrder, [
+      "adimages",
+      "adimages",
+      "adcreatives",
+      "ads",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (prevAddroidHome === undefined) delete process.env.ADDROID_HOME;
+    else process.env.ADDROID_HOME = prevAddroidHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("FailClosedApplyExecutor: skipped for unsupported action kinds (matches Cli/Mock contract)", async () => {
   const executor = new FailClosedApplyExecutor();
   const unsupportedPseudoAction = {
@@ -1173,7 +1426,9 @@ test("FailClosedApplyExecutor: skipped for unsupported action kinds (matches Cli
 
 test("resolveApplyExecutor: CLI bin set but no Meta token → GraphApplyExecutor that fails auth_error per invocation", async () => {
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: new FakeMetaAdapter(null),
     versionResolver: async () => "meta-ads-cli 0.5.0",
   });
@@ -1200,7 +1455,9 @@ test("resolveApplyExecutor: CLI bin set but no Meta token → GraphApplyExecutor
 
 test("resolveApplyExecutor: CLI bin + Meta token present → GraphApplyExecutor", async () => {
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: new FakeMetaAdapter({
       accessToken: TOKEN,
       scopes: ["ads_management"],
@@ -1237,7 +1494,9 @@ test("resolveApplyExecutor: adapter throws MetaTokenExpiredError → GraphApplyE
     },
   };
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: throwingAdapter,
     versionResolver: async () => "meta-ads-cli 0.5.0",
   });
@@ -1286,14 +1545,20 @@ test("resolveApplyExecutor: token loader is invoked per executeAction call (reau
   };
 
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: adapter,
     versionResolver: async () => "meta-ads-cli 0.5.0",
   });
   assert.equal(sel.mode, "graph");
 
   // resolveApplyExecutor itself MUST NOT pre-load the token (lease is per-invocation).
-  assert.equal(callCount, 0, "resolveApplyExecutor must not pre-load the token at startup");
+  assert.equal(
+    callCount,
+    0,
+    "resolveApplyExecutor must not pre-load the token at startup",
+  );
 
   // 1st call: token expired → auth_error.
   nextThrow = new MetaTokenExpiredError(new Date(0));
@@ -1320,15 +1585,24 @@ test("resolveApplyExecutor: token loader is invoked per executeAction call (reau
   });
   assert.equal(second.status, "auth_error");
   const secondPayload = second.logPayload as Record<string, unknown>;
-  assert.match(String(secondPayload.stderr ?? ""), /no Meta access token found/);
-  assert.equal(callCount, 2, "token loader must be re-invoked on each executeAction call");
+  assert.match(
+    String(secondPayload.stderr ?? ""),
+    /no Meta access token found/,
+  );
+  assert.equal(
+    callCount,
+    2,
+    "token loader must be re-invoked on each executeAction call",
+  );
 });
 
 test("resolveApplyExecutor: CLI versionResolver is ignored by canonical Graph route", async () => {
   const spawnLog: SpawnLog[] = [];
   let called = false;
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: new FakeMetaAdapter({
       accessToken: TOKEN,
       scopes: ["ads_management"],
@@ -1351,7 +1625,9 @@ test("resolveApplyExecutor: CLI versionResolver is ignored by canonical Graph ro
 test("resolveApplyExecutor: older CLI versions do not affect canonical Graph selection", async () => {
   const spawnLog: SpawnLog[] = [];
   const sel = await resolveApplyExecutor({
-    env: { ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli" } as NodeJS.ProcessEnv,
+    env: {
+      ADDROID_META_CLI_BIN: "/usr/local/bin/meta-ads-cli",
+    } as NodeJS.ProcessEnv,
     metaAdapter: new FakeMetaAdapter({
       accessToken: TOKEN,
       scopes: ["ads_management"],
@@ -1363,7 +1639,11 @@ test("resolveApplyExecutor: older CLI versions do not affect canonical Graph sel
   });
   assert.equal(sel.mode, "graph");
   assert.equal(sel.versionVerification, undefined);
-  assert.equal(spawnLog.length, 0, "must not spawn CLI while Graph is the canonical route");
+  assert.equal(
+    spawnLog.length,
+    0,
+    "must not spawn CLI while Graph is the canonical route",
+  );
 });
 
 // ---------------------------------------------------------------------
@@ -1380,7 +1660,7 @@ test("CliApplyExecutor.executeAction: success propagates context.approvalRecordI
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -1397,7 +1677,7 @@ test("CliApplyExecutor.executeAction: success propagates context.approvalRecordI
   assert.equal(
     payload.approvalRecordId,
     "appr-xyz-001",
-    "approvalRecordId must flow from context into Meta CLI execution_log payload"
+    "approvalRecordId must flow from context into Meta CLI execution_log payload",
   );
   // pullRequestNumber は従来から refs に乗っているので回帰しないこと。
   assert.equal(payload.pullRequestNumber, 17);
@@ -1413,7 +1693,7 @@ test("CliApplyExecutor.executeAction: missing context.approvalRecordId omits the
         exitCode: 0,
       },
     ],
-    log
+    log,
   );
   const executor = new CliApplyExecutor({ runner, metaAdapter: META_ADAPTER });
   const result = await executor.executeAction({
@@ -1424,7 +1704,7 @@ test("CliApplyExecutor.executeAction: missing context.approvalRecordId omits the
   const payload = result.logPayload as Record<string, unknown>;
   assert.ok(
     !("approvalRecordId" in payload),
-    "approvalRecordId must be omitted when context does not carry it"
+    "approvalRecordId must be omitted when context does not carry it",
   );
 });
 
@@ -1513,7 +1793,7 @@ test("CliApplyExecutor.executeAction: pre-spawn auth_error (missing token) paylo
 
 function assertCanonicalSuccessEnvelope(
   payload: Record<string, unknown>,
-  expected: { accountKey: string; sanitizedCommandStartsWith: string }
+  expected: { accountKey: string; sanitizedCommandStartsWith: string },
 ) {
   assert.equal(payload.exitClass, "success");
   assert.equal(payload.exitCode, 0, "mock success exitCode must be 0");
@@ -1521,7 +1801,7 @@ function assertCanonicalSuccessEnvelope(
   assert.equal(typeof payload.stdout, "string");
   assert.ok(
     (payload.stdout as string).length > 0,
-    "mock success stdout should carry a 1 行サマリ"
+    "mock success stdout should carry a 1 行サマリ",
   );
   assert.equal(payload.stderr, "", "mock success stderr must be empty");
   assert.equal(payload.timedOut, false);
@@ -1531,11 +1811,11 @@ function assertCanonicalSuccessEnvelope(
   assert.equal(
     payload.throttleHeaders,
     null,
-    "mock success throttleHeaders must be null"
+    "mock success throttleHeaders must be null",
   );
   assert.ok(
     payload.recommendedAction && typeof payload.recommendedAction === "object",
-    "mock success recommendedAction must be present"
+    "mock success recommendedAction must be present",
   );
   const rec = payload.recommendedAction as Record<string, unknown>;
   assert.equal(rec.kind, "none");
@@ -1544,8 +1824,8 @@ function assertCanonicalSuccessEnvelope(
   assert.ok(
     typeof payload.sanitizedCommand === "string" &&
       (payload.sanitizedCommand as string).startsWith(
-        expected.sanitizedCommandStartsWith
-      )
+        expected.sanitizedCommandStartsWith,
+      ),
   );
   assert.ok(Array.isArray(payload.sanitizedArgs));
 }
@@ -1582,7 +1862,7 @@ test("MockApplyExecutor: success payload omits approvalRecordId when context doe
   const payload = result.logPayload as Record<string, unknown>;
   assert.ok(
     !("approvalRecordId" in payload),
-    "approvalRecordId must be omitted when context does not carry it"
+    "approvalRecordId must be omitted when context does not carry it",
   );
   // pullRequestNumber は context が常に持つので焼き付ける。
   assert.equal(payload.pullRequestNumber, 17);
@@ -1604,12 +1884,12 @@ test("CliApplyExecutor.executeAction: pre-spawn version-unverified payload propa
   assert.equal(
     payload.pullRequestNumber,
     17,
-    "pre-spawn version-unverified payload must carry context.prNumber"
+    "pre-spawn version-unverified payload must carry context.prNumber",
   );
   assert.equal(
     payload.approvalRecordId,
     "appr-vuv-001",
-    "pre-spawn version-unverified payload must carry context.approvalRecordId"
+    "pre-spawn version-unverified payload must carry context.approvalRecordId",
   );
 });
 
@@ -1625,12 +1905,12 @@ test("CliApplyExecutor.executeAction: pre-spawn auth_error payload propagates co
   assert.equal(
     payload.pullRequestNumber,
     17,
-    "pre-spawn auth_error payload must carry context.prNumber"
+    "pre-spawn auth_error payload must carry context.prNumber",
   );
   assert.equal(
     payload.approvalRecordId,
     "appr-auth-001",
-    "pre-spawn auth_error payload must carry context.approvalRecordId"
+    "pre-spawn auth_error payload must carry context.approvalRecordId",
   );
 });
 
@@ -1644,7 +1924,7 @@ test("CliApplyExecutor.executeAction: pre-spawn auth_error omits approvalRecordI
   const payload = result.logPayload as Record<string, unknown>;
   assert.ok(
     !("approvalRecordId" in payload),
-    "approvalRecordId must be omitted when context does not carry it"
+    "approvalRecordId must be omitted when context does not carry it",
   );
   assert.equal(payload.pullRequestNumber, 17);
 });

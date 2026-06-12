@@ -34,7 +34,10 @@ function writeFixture(files: Record<string, string>): {
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content, "utf8");
   }
-  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+  };
 }
 
 function makeFakeStore(): {
@@ -76,11 +79,14 @@ function operationManifest(accountKey: string, actions: unknown[]): string {
       actions,
     },
     null,
-    2
+    2,
   )}\n`;
 }
 
-function legacyOperationManifest(accountKey: string, actions: unknown[]): string {
+function legacyOperationManifest(
+  accountKey: string,
+  actions: unknown[],
+): string {
   return `${JSON.stringify(
     {
       version: 1,
@@ -93,7 +99,7 @@ function legacyOperationManifest(accountKey: string, actions: unknown[]): string
       actions,
     },
     null,
-    2
+    2,
   )}\n`;
 }
 
@@ -106,7 +112,12 @@ test("runPlanForRoot returns ok=true and risk=ok for a clean repo with paused ca
     "operations/primary/create-campaign.json": operationManifest("primary", [
       {
         kind: "campaign.create",
-        payload: { campaignId: "cmp_fall", name: "Fall Promo", objective: "OUTCOME_TRAFFIC", status: "PAUSED" },
+        payload: {
+          campaignId: "cmp_fall",
+          name: "Fall Promo",
+          objective: "OUTCOME_TRAFFIC",
+          status: "PAUSED",
+        },
       },
     ]),
   });
@@ -147,7 +158,7 @@ test("runPlanForRoot reports dry-run failure for unsupported Graph operation wit
     assert.equal(out.perAccount.length, 1);
     assert.match(
       out.perAccount[0]!.findings.map((e) => e.message).join("\n"),
-      /unsupported Graph operation kind/
+      /unsupported Graph operation kind/,
     );
   } finally {
     cleanup();
@@ -172,7 +183,11 @@ test("runPlanForRoot rejects ACTIVE create status inside graphPayload", () => {
   try {
     const out = runPlanForRoot({ rootDir: dir });
     assert.equal(out.ok, false);
-    assert.ok(out.validationErrors.some((e) => e.message.includes("cannot create ACTIVE")));
+    assert.ok(
+      out.validationErrors.some((e) =>
+        e.message.includes("cannot create ACTIVE"),
+      ),
+    );
   } finally {
     cleanup();
   }
@@ -182,23 +197,73 @@ test("runPlanForRoot rejects absolute graph storageKey before apply", () => {
   const { dir, cleanup } = writeFixture({
     ".addroid/project.yaml": VALID_PROJECT,
     "workflows/cron.yaml": VALID_CRON,
-    "operations/primary/create-creative-absolute.json": operationManifest("primary", [
-      {
-        kind: "creative.create",
-        payload: {
-          creativeId: "cr_absolute",
-          name: "Absolute Creative",
-          pageId: "page_1",
-          linkUrl: "https://example.com",
-          storageKey: "/tmp/asset.png",
+    "operations/primary/create-creative-absolute.json": operationManifest(
+      "primary",
+      [
+        {
+          kind: "creative.create",
+          payload: {
+            creativeId: "cr_absolute",
+            name: "Absolute Creative",
+            pageId: "page_1",
+            linkUrl: "https://example.com",
+            storageKey: "/tmp/asset.png",
+          },
         },
-      },
-    ]),
+      ],
+    ),
   });
   try {
     const out = runPlanForRoot({ rootDir: dir });
     assert.equal(out.ok, false);
-    assert.ok(out.validationErrors.some((e) => e.message.includes("managed AdDroid storage key")));
+    assert.ok(
+      out.validationErrors.some((e) =>
+        e.message.includes("managed AdDroid storage key"),
+      ),
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("runPlanForRoot rejects carousel card mismatch before apply", () => {
+  const { dir, cleanup } = writeFixture({
+    ".addroid/project.yaml": VALID_PROJECT,
+    "workflows/cron.yaml": VALID_CRON,
+    "operations/primary/create-carousel-one-card.json": operationManifest(
+      "primary",
+      [
+        {
+          kind: "creative.create",
+          payload: {
+            creativeId: "cr_carousel",
+            name: "Carousel Creative",
+            pageId: "page_1",
+            creative: {
+              type: "carousel",
+              link_url: "https://example.com",
+              message: "main",
+              cards: [
+                {
+                  storage_ref:
+                    "storage://creatives/primary/cr_carousel/card-1.png",
+                  headline: "Only card",
+                },
+              ],
+            },
+          },
+        },
+      ],
+    ),
+  });
+  try {
+    const out = runPlanForRoot({ rootDir: dir });
+    assert.equal(out.ok, false);
+    assert.ok(
+      out.validationErrors.some((e) =>
+        e.message.includes("carousel creative requires 2-10 cards"),
+      ),
+    );
   } finally {
     cleanup();
   }
@@ -208,28 +273,35 @@ test("runPlanForRoot rejects absolute legacy media flag before apply", () => {
   const { dir, cleanup } = writeFixture({
     ".addroid/project.yaml": VALID_PROJECT,
     "workflows/cron.yaml": VALID_CRON,
-    "operations/primary/create-legacy-absolute.json": legacyOperationManifest("primary", [
-      {
-        resource: "creatives",
-        verb: "create",
-        args: [
-          "ads",
-          "creative",
-          "create",
-          "--name",
-          "Absolute Creative",
-          "--page-id",
-          "page_1",
-          "--image",
-          "/tmp/asset.png",
-        ],
-      },
-    ]),
+    "operations/primary/create-legacy-absolute.json": legacyOperationManifest(
+      "primary",
+      [
+        {
+          resource: "creatives",
+          verb: "create",
+          args: [
+            "ads",
+            "creative",
+            "create",
+            "--name",
+            "Absolute Creative",
+            "--page-id",
+            "page_1",
+            "--image",
+            "/tmp/asset.png",
+          ],
+        },
+      ],
+    ),
   });
   try {
     const out = runPlanForRoot({ rootDir: dir });
     assert.equal(out.ok, false);
-    assert.ok(out.validationErrors.some((e) => e.message.includes("--image must be a managed")));
+    assert.ok(
+      out.validationErrors.some((e) =>
+        e.message.includes("--image must be a managed"),
+      ),
+    );
   } finally {
     cleanup();
   }
@@ -313,8 +385,8 @@ test("runPlanForRoot surfaces invalid operation manifest as validation errors", 
     assert.equal(out.risk, "error");
     assert.ok(
       out.validationErrors.some((e) =>
-        e.message.includes("actions[] is required")
-      )
+        e.message.includes("actions[] is required"),
+      ),
     );
   } finally {
     cleanup();
@@ -328,10 +400,16 @@ test("runPlanForRoot accountFilter restricts perAccount to matching account", ()
     ".addroid/project.yaml": VALID_PROJECT,
     "workflows/cron.yaml": VALID_CRON,
     "operations/primary/a.json": operationManifest("primary", [
-      { kind: "campaign.create", payload: { campaignId: "cmp_a", name: "A", status: "PAUSED" } },
+      {
+        kind: "campaign.create",
+        payload: { campaignId: "cmp_a", name: "A", status: "PAUSED" },
+      },
     ]),
     "operations/secondary/b.json": operationManifest("secondary", [
-      { kind: "campaign.create", payload: { campaignId: "cmp_b", name: "B", status: "PAUSED" } },
+      {
+        kind: "campaign.create",
+        payload: { campaignId: "cmp_b", name: "B", status: "PAUSED" },
+      },
     ]),
   });
   try {
@@ -351,7 +429,14 @@ test("persistPlanRun records info-level execution log on a clean plan", async ()
     ".addroid/project.yaml": VALID_PROJECT,
     "workflows/cron.yaml": VALID_CRON,
     "operations/primary/create-campaign.json": operationManifest("primary", [
-      { kind: "campaign.create", payload: { campaignId: "cmp_fall", name: "Fall Promo", status: "PAUSED" } },
+      {
+        kind: "campaign.create",
+        payload: {
+          campaignId: "cmp_fall",
+          name: "Fall Promo",
+          status: "PAUSED",
+        },
+      },
     ]),
   });
   try {

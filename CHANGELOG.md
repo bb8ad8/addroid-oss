@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — カルーセル反映 (Phase 2)
+
+- GitOps apply が carousel creative operation を検証し、card image を `adimages` に順次 upload して `child_attachments` 付き adcreative と PAUSED ad を作成できる Phase 2 経路を追加。
+
 ### Added — カルーセル生成 (Phase 1)
 
 - `creativeFormat=carousel` 指定時に copy / image_prompt agent がカード別画像を生成し、複数 asset を 1 つの carousel creative として QA・PR 証跡・`/creatives` UI に保存表示できる Phase 1 経路を追加。

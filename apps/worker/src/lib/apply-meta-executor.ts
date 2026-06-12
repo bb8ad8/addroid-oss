@@ -44,6 +44,13 @@ import type {
 } from "@addroid/queue";
 
 type CreateCreativeApplyAction = ApplyAction & { kind: "create_creative" };
+interface CarouselApplyCard {
+  position: number;
+  storageKey: string;
+  headline: string;
+  description?: string;
+  linkUrl?: string;
+}
 
 // ---------------------------------------------------------------------
 // regression fix: canonical pre-spawn payload shape
@@ -82,7 +89,7 @@ interface PreSpawnPayloadEnvelopeInput {
 }
 
 function prefailedPayloadEnvelope(
-  input: PreSpawnPayloadEnvelopeInput
+  input: PreSpawnPayloadEnvelopeInput,
 ): Record<string, JsonValue> {
   const now = new Date().toISOString();
   const out: Record<string, JsonValue> = {
@@ -94,7 +101,7 @@ function prefailedPayloadEnvelope(
     signal: null,
     exitClass: input.exitClass,
     recommendedAction: recommendActionForExit(
-      input.exitClass
+      input.exitClass,
     ) as unknown as JsonValue,
     durationMs: 0,
     startedAt: now,
@@ -134,7 +141,7 @@ interface MockSuccessPayloadEnvelopeInput {
 }
 
 function mockSuccessPayloadEnvelope(
-  input: MockSuccessPayloadEnvelopeInput
+  input: MockSuccessPayloadEnvelopeInput,
 ): Record<string, JsonValue> {
   const now = new Date().toISOString();
   return {
@@ -146,7 +153,7 @@ function mockSuccessPayloadEnvelope(
     signal: null,
     exitClass: "success",
     recommendedAction: recommendActionForExit(
-      "success"
+      "success",
     ) as unknown as JsonValue,
     durationMs: 0,
     startedAt: now,
@@ -171,7 +178,10 @@ function mockSuccessPayloadEnvelope(
  * - access token / ad account id は決して args に乗せない。CLI runner 側が公式
  *   CLI 互換 env (`ACCESS_TOKEN` / `AD_ACCOUNT_ID`) として注入する。
  */
-function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
+function planActionToCliArgs(
+  action: ApplyAction,
+  accountCurrency = "USD",
+): {
   args: string[];
   resource: string;
   verb: string;
@@ -199,7 +209,11 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
           cliEnum(action.initialState),
           ...budgetFlags(action.budget, accountCurrency),
           ...(action.adsetBudgetSharing !== undefined
-            ? [action.adsetBudgetSharing ? "--adset-budget-sharing" : "--no-adset-budget-sharing"]
+            ? [
+                action.adsetBudgetSharing
+                  ? "--adset-budget-sharing"
+                  : "--no-adset-budget-sharing",
+              ]
             : []),
         ],
       };
@@ -207,7 +221,13 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
       return {
         resource: "campaigns",
         verb: "update",
-        args: ["ads", "campaign", "update", action.campaignId, ...changeFlags(action.changes, accountCurrency)],
+        args: [
+          "ads",
+          "campaign",
+          "update",
+          action.campaignId,
+          ...changeFlags(action.changes, accountCurrency),
+        ],
       };
     case "create_adset":
       return {
@@ -222,11 +242,18 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
           action.name,
           "--status",
           cliEnum(action.initialState),
-          ...(action.optimizationGoal ? ["--optimization-goal", cliEnum(action.optimizationGoal)] : []),
-          ...(action.billingEvent ? ["--billing-event", cliEnum(action.billingEvent)] : []),
+          ...(action.optimizationGoal
+            ? ["--optimization-goal", cliEnum(action.optimizationGoal)]
+            : []),
+          ...(action.billingEvent
+            ? ["--billing-event", cliEnum(action.billingEvent)]
+            : []),
           ...(action.budget ? budgetFlags(action.budget, accountCurrency) : []),
           ...(action.bidAmount !== undefined
-            ? ["--bid-amount", amountToMinorUnits(action.bidAmount, accountCurrency)]
+            ? [
+                "--bid-amount",
+                amountToMinorUnits(action.bidAmount, accountCurrency),
+              ]
             : []),
           ...(action.startTime ? ["--start-time", action.startTime] : []),
           ...(action.endTime ? ["--end-time", action.endTime] : []),
@@ -234,14 +261,22 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
             ? ["--targeting-countries", action.targeting.countries.join(",")]
             : []),
           ...(action.pixelId ? ["--pixel-id", action.pixelId] : []),
-          ...(action.customEventType ? ["--custom-event-type", cliEnum(action.customEventType)] : []),
+          ...(action.customEventType
+            ? ["--custom-event-type", cliEnum(action.customEventType)]
+            : []),
         ],
       };
     case "update_adset":
       return {
         resource: "adsets",
         verb: "update",
-        args: ["ads", "adset", "update", action.adsetId, ...changeFlags(action.changes, accountCurrency)],
+        args: [
+          "ads",
+          "adset",
+          "update",
+          action.adsetId,
+          ...changeFlags(action.changes, accountCurrency),
+        ],
       };
     case "create_ad":
       return {
@@ -259,14 +294,22 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
           "--status",
           cliEnum(action.initialState),
           ...(action.pixelId ? ["--pixel-id", action.pixelId] : []),
-          ...(action.trackingSpecs ? ["--tracking-specs", JSON.stringify(action.trackingSpecs)] : []),
+          ...(action.trackingSpecs
+            ? ["--tracking-specs", JSON.stringify(action.trackingSpecs)]
+            : []),
         ],
       };
     case "update_ad":
       return {
         resource: "ads",
         verb: "update",
-        args: ["ads", "ad", "update", action.adId, ...changeFlags(action.changes, accountCurrency)],
+        args: [
+          "ads",
+          "ad",
+          "update",
+          action.adId,
+          ...changeFlags(action.changes, accountCurrency),
+        ],
       };
     case "create_creative":
       return {
@@ -279,27 +322,48 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
           "--name",
           action.name,
           ...(action.pageId ? ["--page-id", action.pageId] : []),
-          ...(action.storageKey && action.mediaType === "image" ? ["--image", fileArg(action.storageKey)] : []),
-          ...(action.storageKey && action.mediaType === "video" ? ["--video", fileArg(action.storageKey)] : []),
-          ...(action.body ?? action.primaryText ? ["--body", action.body ?? action.primaryText ?? ""] : []),
-          ...(action.title ?? action.headline ? ["--title", action.title ?? action.headline ?? ""] : []),
+          ...(action.storageKey && action.mediaType === "image"
+            ? ["--image", fileArg(action.storageKey)]
+            : []),
+          ...(action.storageKey && action.mediaType === "video"
+            ? ["--video", fileArg(action.storageKey)]
+            : []),
+          ...((action.body ?? action.primaryText)
+            ? ["--body", action.body ?? action.primaryText ?? ""]
+            : []),
+          ...((action.title ?? action.headline)
+            ? ["--title", action.title ?? action.headline ?? ""]
+            : []),
           ...(action.linkUrl ? ["--link-url", action.linkUrl] : []),
           ...(action.description ? ["--description", action.description] : []),
-          ...(action.callToAction ? ["--call-to-action", cliEnum(action.callToAction)] : []),
-          ...(action.instagramUserId ? ["--instagram-actor-id", action.instagramUserId] : []),
+          ...(action.callToAction
+            ? ["--call-to-action", cliEnum(action.callToAction)]
+            : []),
+          ...(action.instagramUserId
+            ? ["--instagram-actor-id", action.instagramUserId]
+            : []),
           ...repeatFlags("--images", action.images?.map(fileArg)),
           ...repeatFlags("--videos", action.videos?.map(fileArg)),
           ...repeatFlags("--titles", action.titles),
           ...repeatFlags("--bodies", action.bodies),
           ...repeatFlags("--descriptions", action.descriptions),
-          ...repeatFlags("--call-to-actions", action.callToActions?.map(cliEnum)),
+          ...repeatFlags(
+            "--call-to-actions",
+            action.callToActions?.map(cliEnum),
+          ),
         ],
       };
     case "update_creative":
       return {
         resource: "creatives",
         verb: "update",
-        args: ["ads", "creative", "update", action.creativeId, ...changeFlags(action.changes, accountCurrency)],
+        args: [
+          "ads",
+          "creative",
+          "update",
+          action.creativeId,
+          ...changeFlags(action.changes, accountCurrency),
+        ],
       };
     case "delete_campaign":
       return {
@@ -333,14 +397,20 @@ function planActionToCliArgs(action: ApplyAction, accountCurrency = "USD"): {
 
 function budgetFlags(
   b: { dailyBudget?: number; lifetimeBudget?: number },
-  accountCurrency: string
+  accountCurrency: string,
 ): string[] {
   const out: string[] = [];
   if (b.dailyBudget !== undefined) {
-    out.push("--daily-budget", amountToMinorUnits(b.dailyBudget, accountCurrency));
+    out.push(
+      "--daily-budget",
+      amountToMinorUnits(b.dailyBudget, accountCurrency),
+    );
   }
   if (b.lifetimeBudget !== undefined) {
-    out.push("--lifetime-budget", amountToMinorUnits(b.lifetimeBudget, accountCurrency));
+    out.push(
+      "--lifetime-budget",
+      amountToMinorUnits(b.lifetimeBudget, accountCurrency),
+    );
   }
   return out;
 }
@@ -405,13 +475,16 @@ function resolveStorageFlagArgs(args: readonly string[]): string[] {
   return out;
 }
 
-function repeatFlags(flag: string, values: readonly string[] | undefined): string[] {
+function repeatFlags(
+  flag: string,
+  values: readonly string[] | undefined,
+): string[] {
   return (values ?? []).flatMap((value) => [flag, value]);
 }
 
 function changeFlags(
   changes: Record<string, { to?: unknown }>,
-  accountCurrency: string
+  accountCurrency: string,
 ): string[] {
   const out: string[] = [];
   for (const [key, change] of Object.entries(changes)) {
@@ -426,11 +499,17 @@ function changeFlags(
         break;
       case "budget":
         if (isRecord(value)) {
-          out.push(...budgetFlags(value as { dailyBudget?: number; lifetimeBudget?: number }, accountCurrency));
+          out.push(
+            ...budgetFlags(
+              value as { dailyBudget?: number; lifetimeBudget?: number },
+              accountCurrency,
+            ),
+          );
         }
         break;
       case "bidAmount":
-        if (typeof value === "number") out.push("--bid-amount", amountToMinorUnits(value, accountCurrency));
+        if (typeof value === "number")
+          out.push("--bid-amount", amountToMinorUnits(value, accountCurrency));
         break;
       case "endTime":
         out.push("--end-time", String(value));
@@ -504,7 +583,9 @@ class MetaGraphApplyError extends Error {
   }
 }
 
-function statusForExitClass(exitClass: MetaCliExitClass): ExecuteActionResult["status"] {
+function statusForExitClass(
+  exitClass: MetaCliExitClass,
+): ExecuteActionResult["status"] {
   return exitClass === "auth_error"
     ? "auth_error"
     : exitClass === "rate_limit_error"
@@ -534,7 +615,8 @@ function applyInputErrorResult(input: {
     sanitizedCommand: "meta-ads-cli",
     sanitizedArgs: [],
     pullRequestNumber: input.context.prNumber,
-    ...(typeof ctxApprovalRecordId === "string" && ctxApprovalRecordId.length > 0
+    ...(typeof ctxApprovalRecordId === "string" &&
+    ctxApprovalRecordId.length > 0
       ? { approvalRecordId: ctxApprovalRecordId }
       : {}),
   });
@@ -569,13 +651,14 @@ function graphEndpoint(pathname: string): string {
 async function postGraphJson(
   pathname: string,
   accessToken: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<{ status: number; json: unknown }> {
   const form = new URLSearchParams();
   for (const [key, value] of Object.entries(body)) {
     if (value === undefined || value === null) continue;
     if (typeof value === "object") form.set(key, JSON.stringify(value));
-    else if (typeof value === "boolean") form.set(key, value ? "true" : "false");
+    else if (typeof value === "boolean")
+      form.set(key, value ? "true" : "false");
     else form.set(key, String(value));
   }
   const res = await fetch(graphEndpoint(pathname), {
@@ -595,7 +678,7 @@ async function postGraphMultipart(
   pathname: string,
   accessToken: string,
   fields: Record<string, string>,
-  file: { field: string; path: string }
+  file: { field: string; path: string },
 ): Promise<{ status: number; json: unknown }> {
   const bytes = await fs.readFile(file.path);
   const form = new FormData();
@@ -626,11 +709,27 @@ function graphError(status: number, json: unknown): MetaGraphApplyError {
   });
 }
 
-function classifyGraphError(status: number, code: number | null): MetaCliExitClass {
-  if (status === 401 || code === 190 || code === 102 || code === 104 || code === 463 || code === 467) {
+function classifyGraphError(
+  status: number,
+  code: number | null,
+): MetaCliExitClass {
+  if (
+    status === 401 ||
+    code === 190 ||
+    code === 102 ||
+    code === 104 ||
+    code === 463 ||
+    code === 467
+  ) {
     return "auth_error";
   }
-  if (status === 429 || code === 4 || code === 17 || code === 32 || code === 613) {
+  if (
+    status === 429 ||
+    code === 4 ||
+    code === 17 ||
+    code === 32 ||
+    code === 613
+  ) {
     return "rate_limit_error";
   }
   if (status >= 400 && status < 500) return "api_error";
@@ -650,7 +749,11 @@ function extractImageHash(json: unknown): string | null {
   const images = json.images;
   if (!isRecord(images)) return null;
   for (const value of Object.values(images)) {
-    if (isRecord(value) && typeof value.hash === "string" && value.hash.length > 0) {
+    if (
+      isRecord(value) &&
+      typeof value.hash === "string" &&
+      value.hash.length > 0
+    ) {
       return value.hash;
     }
   }
@@ -680,10 +783,12 @@ function graphLogPayload(input: {
     binary: "meta-graph-api",
     sanitizedCommand: input.sanitizedCommand,
     sanitizedArgs: input.sanitizedArgs,
-    exitCode: input.exitClass === "success" ? 0 : input.statusCode ?? null,
+    exitCode: input.exitClass === "success" ? 0 : (input.statusCode ?? null),
     signal: null,
     exitClass: input.exitClass,
-    recommendedAction: recommendActionForExit(input.exitClass) as unknown as JsonValue,
+    recommendedAction: recommendActionForExit(
+      input.exitClass,
+    ) as unknown as JsonValue,
     durationMs: input.durationMs,
     startedAt: input.startedAt,
     finishedAt: input.finishedAt,
@@ -709,9 +814,16 @@ function graphLogPayload(input: {
   return out;
 }
 
-function buildImageCreativeObjectStorySpec(action: CreateCreativeApplyAction, imageHash: string): Record<string, unknown> {
-  if (!action.pageId) throw new Error("create_creative requires pageId for Meta Graph apply");
-  if (!action.linkUrl) throw new Error("create_creative image link ad requires linkUrl for Meta Graph apply");
+function buildImageCreativeObjectStorySpec(
+  action: CreateCreativeApplyAction,
+  imageHash: string,
+): Record<string, unknown> {
+  if (!action.pageId)
+    throw new Error("create_creative requires pageId for Meta Graph apply");
+  if (!action.linkUrl)
+    throw new Error(
+      "create_creative image link ad requires linkUrl for Meta Graph apply",
+    );
   const linkData: Record<string, unknown> = {
     image_hash: imageHash,
     link: action.linkUrl,
@@ -730,9 +842,71 @@ function buildImageCreativeObjectStorySpec(action: CreateCreativeApplyAction, im
   }
   return {
     page_id: action.pageId,
-    ...(action.instagramUserId ? { instagram_user_id: action.instagramUserId } : {}),
+    ...(action.instagramUserId
+      ? { instagram_user_id: action.instagramUserId }
+      : {}),
     link_data: linkData,
   };
+}
+
+function buildCarouselCreativeObjectStorySpec(
+  action: CreateCreativeApplyAction,
+  cards: readonly CarouselApplyCard[],
+  imageHashes: readonly string[],
+): Record<string, unknown> {
+  if (!action.pageId)
+    throw new MetaGraphApplyError({
+      message: "create_creative carousel requires pageId",
+      exitClass: "api_error",
+    });
+  if (!action.linkUrl)
+    throw new MetaGraphApplyError({
+      message: "create_creative carousel requires linkUrl",
+      exitClass: "api_error",
+    });
+  if (cards.length !== imageHashes.length) {
+    throw new MetaGraphApplyError({
+      message: "carousel card count does not match uploaded image hashes",
+      exitClass: "api_error",
+    });
+  }
+  const childAttachments = cards.map((card, index) => {
+    const link = card.linkUrl ?? action.linkUrl;
+    if (!link)
+      throw new MetaGraphApplyError({
+        message: `carousel card ${index + 1} requires linkUrl`,
+        exitClass: "api_error",
+      });
+    return removeUndefinedGraph({
+      image_hash: imageHashes[index],
+      name: card.headline,
+      description: card.description,
+      link,
+    });
+  });
+  const cta = action.callToAction;
+  const linkData: Record<string, unknown> = removeUndefinedGraph({
+    link: action.linkUrl,
+    message: action.body ?? action.primaryText ?? "",
+    child_attachments: childAttachments,
+    call_to_action:
+      cta && cta !== "NO_BUTTON"
+        ? {
+            type: cta,
+            value: removeUndefinedGraph({
+              link: action.linkUrl,
+              app_link: action.instagramAppLink,
+            }),
+          }
+        : undefined,
+  });
+  return removeUndefinedGraph({
+    page_id: action.pageId,
+    ...(action.instagramUserId
+      ? { instagram_user_id: action.instagramUserId }
+      : {}),
+    link_data: linkData,
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -763,7 +937,8 @@ function isCreateRequiringExternalId(kind: ApplyAction["kind"]): boolean {
 }
 
 function actionRequiresExternalId(action: ApplyAction): boolean {
-  if (action.kind === "meta_cli_operation") return action.externalIdRequired === true;
+  if (action.kind === "meta_cli_operation")
+    return action.externalIdRequired === true;
   return isCreateRequiringExternalId(action.kind);
 }
 
@@ -781,7 +956,7 @@ function actionRequiresExternalId(action: ApplyAction): boolean {
  * create_* かつ external_id 欠落のケースを fail-closed する。
  */
 export function extractExternalIdFromCliStdout(
-  stdout: string
+  stdout: string,
 ): string | undefined {
   if (!stdout) return undefined;
   const trimmed = stdout.trim();
@@ -798,13 +973,9 @@ export function extractExternalIdFromCliStdout(
   }
 
   // 最後の砦: 自由形式テキストに `"id":"..."` 等が紛れているケース。
-  const m = stdout.match(
-    /"(externalId|external_id|id)"\s*:\s*"([^"\\]+)"/
-  );
+  const m = stdout.match(/"(externalId|external_id|id)"\s*:\s*"([^"\\]+)"/);
   if (m && m[2]) return m[2];
-  const numeric = stdout.match(
-    /"(externalId|external_id|id)"\s*:\s*(\d+)/
-  );
+  const numeric = stdout.match(/"(externalId|external_id|id)"\s*:\s*(\d+)/);
   if (numeric && numeric[2]) return numeric[2];
 
   const tableId = extractIdFromCliTable(stdout);
@@ -814,7 +985,10 @@ export function extractExternalIdFromCliStdout(
 }
 
 function extractIdFromCliTable(stdout: string): string | undefined {
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   for (let i = 0; i < lines.length; i += 1) {
     if (!/^id\b/i.test(lines[i]!)) continue;
     const separator = lines[i + 1] ?? "";
@@ -872,7 +1046,9 @@ function deterministicMockExternalId(action: ApplyAction): string | undefined {
     case "update_creative":
       return `mock-${action.account}-cr-${action.creativeId}`;
     case "meta_cli_operation":
-      return action.entity?.nodeKey ? `mock-${action.account}-${action.entity.nodeType ?? "op"}-${action.entity.nodeKey}` : undefined;
+      return action.entity?.nodeKey
+        ? `mock-${action.account}-${action.entity.nodeType ?? "op"}-${action.entity.nodeKey}`
+        : undefined;
     default:
       return undefined;
   }
@@ -911,7 +1087,10 @@ export class MockApplyExecutor implements MetaActionExecutor {
       return {
         status: "skipped",
         message: `unsupported action kind ${input.action.kind} skipped (verified ops matrix)`,
-        logPayload: { reason: "unsupported_action", actionKind: input.action.kind },
+        logPayload: {
+          reason: "unsupported_action",
+          actionKind: input.action.kind,
+        },
       };
     }
     // regression fix: local-test simulation でも create_* の external_id を
@@ -991,7 +1170,10 @@ export class FailClosedApplyExecutor implements MetaActionExecutor {
       return {
         status: "skipped",
         message: `unsupported action kind ${input.action.kind} skipped (verified ops matrix)`,
-        logPayload: { reason: "unsupported_action", actionKind: input.action.kind },
+        logPayload: {
+          reason: "unsupported_action",
+          actionKind: input.action.kind,
+        },
       };
     }
     const detail =
@@ -1012,7 +1194,8 @@ export class FailClosedApplyExecutor implements MetaActionExecutor {
       sanitizedCommand: `meta-ads-cli ${args.args.join(" ")}`,
       sanitizedArgs: args.args,
       pullRequestNumber: input.context.prNumber,
-      ...(typeof ctxApprovalRecordId === "string" && ctxApprovalRecordId.length > 0
+      ...(typeof ctxApprovalRecordId === "string" &&
+      ctxApprovalRecordId.length > 0
         ? { approvalRecordId: ctxApprovalRecordId }
         : {}),
     });
@@ -1049,8 +1232,12 @@ export interface CliApplyExecutorOptions {
 export class CliApplyExecutor implements MetaActionExecutor {
   private readonly runner: MetaCliRunner;
   private readonly metaAdapter: MetaAdapter;
-  private readonly resolveAdAccountId?: (accountKey: string) => Promise<string | null>;
-  private readonly resolveAdAccountCurrency?: (accountKey: string) => Promise<string | null>;
+  private readonly resolveAdAccountId?: (
+    accountKey: string,
+  ) => Promise<string | null>;
+  private readonly resolveAdAccountCurrency?: (
+    accountKey: string,
+  ) => Promise<string | null>;
   private readonly createdCreativeExternalIds = new Map<string, string>();
   private readonly createdOperationExternalIds = new Map<string, string>();
   constructor(opts: CliApplyExecutorOptions) {
@@ -1165,7 +1352,8 @@ export class CliApplyExecutor implements MetaActionExecutor {
           sanitizedCommand,
           sanitizedArgs: args.args,
           pullRequestNumber: input.context.prNumber,
-          ...(typeof approvalRecordId === "string" && approvalRecordId.length > 0
+          ...(typeof approvalRecordId === "string" &&
+          approvalRecordId.length > 0
             ? { approvalRecordId }
             : {}),
         });
@@ -1210,7 +1398,8 @@ export class CliApplyExecutor implements MetaActionExecutor {
           sanitizedCommand,
           sanitizedArgs: args.args,
           pullRequestNumber: input.context.prNumber,
-          ...(typeof approvalRecordId === "string" && approvalRecordId.length > 0
+          ...(typeof approvalRecordId === "string" &&
+          approvalRecordId.length > 0
             ? { approvalRecordId }
             : {}),
         });
@@ -1275,7 +1464,7 @@ export class CliApplyExecutor implements MetaActionExecutor {
     ) {
       this.createdOperationExternalIds.set(
         `${action.account}:${action.entity.nodeType}:${action.entity.nodeKey}`,
-        out.externalId
+        out.externalId,
       );
     }
 
@@ -1290,7 +1479,7 @@ export class CliApplyExecutor implements MetaActionExecutor {
       const attempt = input.attempt;
       const delay = Math.min(
         rec.maxBackoffMs,
-        rec.initialBackoffMs * Math.pow(2, attempt)
+        rec.initialBackoffMs * Math.pow(2, attempt),
       );
       out.retry = {
         delayMs: delay,
@@ -1310,19 +1499,30 @@ export class CliApplyExecutor implements MetaActionExecutor {
   }
 
   private rewriteActionRefs(action: ApplyAction): ApplyAction {
-    if (action.kind === "meta_cli_operation") return this.rewriteOperationRefs(action);
+    if (action.kind === "meta_cli_operation")
+      return this.rewriteOperationRefs(action);
     if (action.kind !== "create_ad") return action;
-    const resolved = this.createdCreativeExternalIds.get(`${action.account}:${action.creativeRef}`);
+    const resolved = this.createdCreativeExternalIds.get(
+      `${action.account}:${action.creativeRef}`,
+    );
     return resolved ? { ...action, creativeRef: resolved } : action;
   }
 
-  private rewriteOperationRefs(action: Extract<ApplyAction, { kind: "meta_cli_operation" }>): ApplyAction {
+  private rewriteOperationRefs(
+    action: Extract<ApplyAction, { kind: "meta_cli_operation" }>,
+  ): ApplyAction {
     const args = action.args.map((arg) =>
-      arg.replace(/\{\{([A-Za-z0-9_-]+):([^}]+)\}\}/g, (match, nodeType: string, nodeKey: string) =>
-        this.createdOperationExternalIds.get(`${action.account}:${nodeType}:${nodeKey}`) ?? match
-      )
+      arg.replace(
+        /\{\{([A-Za-z0-9_-]+):([^}]+)\}\}/g,
+        (match, nodeType: string, nodeKey: string) =>
+          this.createdOperationExternalIds.get(
+            `${action.account}:${nodeType}:${nodeKey}`,
+          ) ?? match,
+      ),
     );
-    return args.some((arg, index) => arg !== action.args[index]) ? { ...action, args } : action;
+    return args.some((arg, index) => arg !== action.args[index])
+      ? { ...action, args }
+      : action;
   }
 
   private async executeGraphCreateCreative(input: {
@@ -1336,15 +1536,100 @@ export class CliApplyExecutor implements MetaActionExecutor {
     const accountKey = input.action.account;
     const adAccountId = input.invocation.adAccountId ?? accountKey;
     const finish = () => new Date();
-    const duration = (finishedAt: Date) => finishedAt.getTime() - startedAt.getTime();
+    const duration = (finishedAt: Date) =>
+      finishedAt.getTime() - startedAt.getTime();
     try {
       const lease = await this.metaAdapter.loadAccessTokenPlaintext();
       if (!lease) throw new MetaCliMissingTokenError(accountKey);
+      const actionRecord = input.action as unknown as Record<string, unknown>;
+      if (isCarouselCreative(actionRecord)) {
+        const cards = requireCarouselCards(actionRecord);
+        const preflight = await this.validateCreativeIdentity({
+          accessToken: lease.accessToken,
+          adAccountId,
+          pageId: input.action.pageId ?? null,
+          instagramUserId: input.action.instagramUserId ?? null,
+        });
+        const imageHashes: string[] = [];
+        for (const card of cards) {
+          const uploaded = await postGraphMultipart(
+            `${adAccountId}/adimages`,
+            lease.accessToken,
+            {},
+            { field: "source", path: fileArg(card.storageKey) },
+          );
+          const imageHash = extractImageHash(uploaded.json);
+          if (!imageHash) {
+            throw new MetaGraphApplyError({
+              message: `Meta Graph adimages response did not include an image hash for carousel card ${card.position}`,
+              exitClass: "unknown_error",
+              status: uploaded.status,
+              payload: uploaded.json as JsonValue,
+            });
+          }
+          imageHashes.push(imageHash);
+        }
+        const objectStorySpec = buildCarouselCreativeObjectStorySpec(
+          input.action,
+          cards,
+          imageHashes,
+        );
+        const created = await postGraphJson(
+          `${adAccountId}/adcreatives`,
+          lease.accessToken,
+          {
+            name: input.action.name,
+            object_story_spec: JSON.stringify(objectStorySpec),
+          },
+        );
+        const externalId = extractId(created.json);
+        if (!externalId) {
+          throw new MetaGraphApplyError({
+            message: "Meta Graph adcreatives response did not include id",
+            exitClass: "unknown_error",
+            status: created.status,
+            payload: created.json as JsonValue,
+          });
+        }
+        this.createdCreativeExternalIds.set(
+          `${accountKey}:${input.action.creativeId}`,
+          externalId,
+        );
+        const finishedAt = finish();
+        return {
+          status: "success",
+          message: `meta graph creatives create succeeded (${externalId})`,
+          externalId,
+          logPayload: graphLogPayload({
+            accountKey,
+            action: input.action,
+            resource: input.args.resource,
+            verb: input.args.verb,
+            sanitizedCommand: input.sanitizedCommand.replace(
+              /^meta-ads-cli /,
+              "meta-graph-api ",
+            ),
+            sanitizedArgs: input.args.args,
+            refs: input.refs,
+            startedAt: startedAt.toISOString(),
+            finishedAt: finishedAt.toISOString(),
+            durationMs: duration(finishedAt),
+            exitClass: "success",
+            stdout: JSON.stringify({ id: externalId }),
+            response: created.json as JsonValue,
+            preflight: preflight as JsonValue,
+          }),
+        };
+      }
       if (input.action.mediaType !== "image" || !input.action.storageKey) {
         throw new MetaGraphApplyError({
-          message: "Meta Graph creative apply currently requires image media with storageKey",
+          message:
+            "Meta Graph creative apply currently requires image media with storageKey",
           exitClass: "api_error",
-          payload: { mediaType: input.action.mediaType, hasStorageKey: Boolean(input.action.storageKey) },
+          payload: {
+            mediaType: input.action.mediaType,
+            hasStorageKey: Boolean(input.action.storageKey),
+          },
         });
       }
       const preflight = await this.validateCreativeIdentity({
@@ -1358,7 +1643,7 @@ export class CliApplyExecutor implements MetaActionExecutor {
         `${adAccountId}/adimages`,
         lease.accessToken,
         {},
-        { field: "source", path: imagePath }
+        { field: "source", path: imagePath },
       );
       const imageHash = extractImageHash(uploaded.json);
       if (!imageHash) {
@@ -1369,11 +1654,18 @@ export class CliApplyExecutor implements MetaActionExecutor {
           payload: uploaded.json as JsonValue,
         });
       }
-      const objectStorySpec = buildImageCreativeObjectStorySpec(input.action, imageHash);
-      const created = await postGraphJson(`${adAccountId}/adcreatives`, lease.accessToken, {
-        name: input.action.name,
-        object_story_spec: JSON.stringify(objectStorySpec),
-      });
+      const objectStorySpec = buildImageCreativeObjectStorySpec(
+        input.action,
+        imageHash,
+      );
+      const created = await postGraphJson(
+        `${adAccountId}/adcreatives`,
+        lease.accessToken,
+        {
+          name: input.action.name,
+          object_story_spec: JSON.stringify(objectStorySpec),
+        },
+      );
       const externalId = extractId(created.json);
       if (!externalId) {
         throw new MetaGraphApplyError({
@@ -1383,7 +1675,10 @@ export class CliApplyExecutor implements MetaActionExecutor {
           payload: created.json as JsonValue,
         });
       }
-      this.createdCreativeExternalIds.set(`${accountKey}:${input.action.creativeId}`, externalId);
+      this.createdCreativeExternalIds.set(
+        `${accountKey}:${input.action.creativeId}`,
+        externalId,
+      );
       const finishedAt = finish();
       return {
         status: "success",
@@ -1394,7 +1689,10 @@ export class CliApplyExecutor implements MetaActionExecutor {
           action: input.action,
           resource: input.args.resource,
           verb: input.args.verb,
-          sanitizedCommand: input.sanitizedCommand.replace(/^meta-ads-cli /, "meta-graph-api "),
+          sanitizedCommand: input.sanitizedCommand.replace(
+            /^meta-ads-cli /,
+            "meta-graph-api ",
+          ),
           sanitizedArgs: input.args.args,
           refs: input.refs,
           startedAt: startedAt.toISOString(),
@@ -1422,7 +1720,10 @@ export class CliApplyExecutor implements MetaActionExecutor {
             action: input.action,
             resource: input.args.resource,
             verb: input.args.verb,
-            sanitizedCommand: input.sanitizedCommand.replace(/^meta-ads-cli /, "meta-graph-api "),
+            sanitizedCommand: input.sanitizedCommand.replace(
+              /^meta-ads-cli /,
+              "meta-graph-api ",
+            ),
             sanitizedArgs: input.args.args,
             refs: input.refs,
             startedAt: startedAt.toISOString(),
@@ -1452,7 +1753,10 @@ export class CliApplyExecutor implements MetaActionExecutor {
             action: input.action,
             resource: input.args.resource,
             verb: input.args.verb,
-            sanitizedCommand: input.sanitizedCommand.replace(/^meta-ads-cli /, "meta-graph-api "),
+            sanitizedCommand: input.sanitizedCommand.replace(
+              /^meta-ads-cli /,
+              "meta-graph-api ",
+            ),
             sanitizedArgs: input.args.args,
             refs: input.refs,
             startedAt: startedAt.toISOString(),
@@ -1467,7 +1771,10 @@ export class CliApplyExecutor implements MetaActionExecutor {
         if (rec.kind === "retry_with_backoff") {
           const attempt = 0;
           out.retry = {
-            delayMs: Math.min(rec.maxBackoffMs, rec.initialBackoffMs * Math.pow(2, attempt)),
+            delayMs: Math.min(
+              rec.maxBackoffMs,
+              rec.initialBackoffMs * Math.pow(2, attempt),
+            ),
             maxAttempts: rec.maxAttempts,
           };
         } else if (
@@ -1512,8 +1819,12 @@ export interface GraphApplyExecutorOptions {
 
 export class GraphApplyExecutor implements MetaActionExecutor {
   private readonly metaAdapter: MetaAdapter;
-  private readonly resolveAdAccountId?: (accountKey: string) => Promise<string | null>;
-  private readonly resolveAdAccountCurrency?: (accountKey: string) => Promise<string | null>;
+  private readonly resolveAdAccountId?: (
+    accountKey: string,
+  ) => Promise<string | null>;
+  private readonly resolveAdAccountCurrency?: (
+    accountKey: string,
+  ) => Promise<string | null>;
   private readonly refs = new Map<string, string>();
 
   constructor(opts: GraphApplyExecutorOptions) {
@@ -1528,7 +1839,10 @@ export class GraphApplyExecutor implements MetaActionExecutor {
       return {
         status: "skipped",
         message: `unsupported action kind ${input.action.kind} skipped by Graph executor`,
-        logPayload: { reason: "unsupported_action", actionKind: input.action.kind },
+        logPayload: {
+          reason: "unsupported_action",
+          actionKind: input.action.kind,
+        },
       };
     }
     const startedAt = new Date();
@@ -1538,20 +1852,26 @@ export class GraphApplyExecutor implements MetaActionExecutor {
       refType: "apply_job",
       refId: input.context.applyJobId,
       pullRequestNumber: input.context.prNumber,
-      ...(typeof input.context.approvalRecordId === "string" && input.context.approvalRecordId.length > 0
+      ...(typeof input.context.approvalRecordId === "string" &&
+      input.context.approvalRecordId.length > 0
         ? { approvalRecordId: input.context.approvalRecordId }
         : {}),
     };
     const sanitizedCommand = `meta-graph-api ${action.kind}`;
     const finish = () => new Date();
-    const duration = (finishedAt: Date) => finishedAt.getTime() - startedAt.getTime();
+    const duration = (finishedAt: Date) =>
+      finishedAt.getTime() - startedAt.getTime();
     try {
       const lease = await this.metaAdapter.loadAccessTokenPlaintext();
       if (!lease) throw new MetaCliMissingTokenError(accountKey);
       const adAccountId =
-        (this.resolveAdAccountId ? await this.resolveAdAccountId(accountKey) : null) ?? accountKey;
+        (this.resolveAdAccountId
+          ? await this.resolveAdAccountId(accountKey)
+          : null) ?? accountKey;
       const currency =
-        (this.resolveAdAccountCurrency ? await this.resolveAdAccountCurrency(accountKey) : null) ?? "USD";
+        (this.resolveAdAccountCurrency
+          ? await this.resolveAdAccountCurrency(accountKey)
+          : null) ?? "USD";
       const result = await this.executeGraphAction({
         action,
         accessToken: lease.accessToken,
@@ -1576,7 +1896,9 @@ export class GraphApplyExecutor implements MetaActionExecutor {
           finishedAt: finishedAt.toISOString(),
           durationMs: duration(finishedAt),
           exitClass: "success",
-          stdout: result.externalId ? JSON.stringify({ id: result.externalId }) : "",
+          stdout: result.externalId
+            ? JSON.stringify({ id: result.externalId })
+            : "",
           response: result.response,
           preflight: result.preflight,
         }),
@@ -1641,7 +1963,10 @@ export class GraphApplyExecutor implements MetaActionExecutor {
         };
         if (rec.kind === "retry_with_backoff") {
           out.retry = {
-            delayMs: Math.min(rec.maxBackoffMs, rec.initialBackoffMs * Math.pow(2, input.attempt)),
+            delayMs: Math.min(
+              rec.maxBackoffMs,
+              rec.initialBackoffMs * Math.pow(2, input.attempt),
+            ),
             maxAttempts: rec.maxAttempts,
           };
         } else if (
@@ -1662,65 +1987,110 @@ export class GraphApplyExecutor implements MetaActionExecutor {
     accessToken: string;
     adAccountId: string;
     accountCurrency: string;
-  }): Promise<{ externalId?: string; response: JsonValue; preflight?: JsonValue }> {
+  }): Promise<{
+    externalId?: string;
+    response: JsonValue;
+    preflight?: JsonValue;
+  }> {
     const { action, accessToken, adAccountId, accountCurrency } = input;
     const payload = resolvePayloadRefs(action.payload, this.refs);
     switch (action.kind) {
       case "campaign.create": {
-        const created = await postGraphJson(`${adAccountId}/campaigns`, accessToken, graphCampaignCreatePayload(payload, accountCurrency));
+        const created = await postGraphJson(
+          `${adAccountId}/campaigns`,
+          accessToken,
+          graphCampaignCreatePayload(payload, accountCurrency),
+        );
         return requireGraphId(created.json, "campaign.create");
       }
       case "campaign.update":
       case "campaign.status": {
         const id = requireTargetId(payload, "campaignId", action);
-        const updated = await postGraphJson(id, accessToken, graphUpdatePayload(payload, accountCurrency));
+        const updated = await postGraphJson(
+          id,
+          accessToken,
+          graphUpdatePayload(payload, accountCurrency),
+        );
         return { externalId: id, response: updated.json as JsonValue };
       }
       case "campaign.delete": {
         const id = requireTargetId(payload, "campaignId", action);
-        const deleted = await postGraphJson(id, accessToken, { status: "DELETED" });
+        const deleted = await postGraphJson(id, accessToken, {
+          status: "DELETED",
+        });
         return { externalId: id, response: deleted.json as JsonValue };
       }
       case "adset.create": {
-        const created = await postGraphJson(`${adAccountId}/adsets`, accessToken, graphAdsetCreatePayload(payload, accountCurrency));
+        const created = await postGraphJson(
+          `${adAccountId}/adsets`,
+          accessToken,
+          graphAdsetCreatePayload(payload, accountCurrency),
+        );
         return requireGraphId(created.json, "adset.create");
       }
       case "adset.update":
       case "adset.status": {
         const id = requireTargetId(payload, "adsetId", action);
-        const updated = await postGraphJson(id, accessToken, graphUpdatePayload(payload, accountCurrency));
+        const updated = await postGraphJson(
+          id,
+          accessToken,
+          graphUpdatePayload(payload, accountCurrency),
+        );
         return { externalId: id, response: updated.json as JsonValue };
       }
       case "adset.delete": {
         const id = requireTargetId(payload, "adsetId", action);
-        const deleted = await postGraphJson(id, accessToken, { status: "DELETED" });
+        const deleted = await postGraphJson(id, accessToken, {
+          status: "DELETED",
+        });
         return { externalId: id, response: deleted.json as JsonValue };
       }
       case "creative.create":
-        return this.executeCreativeCreate({ action, payload, accessToken, adAccountId });
+        return this.executeCreativeCreate({
+          action,
+          payload,
+          accessToken,
+          adAccountId,
+        });
       case "creative.update": {
         const id = requireTargetId(payload, "creativeId", action);
-        const updated = await postGraphJson(id, accessToken, graphCreativeUpdatePayload(payload));
+        const updated = await postGraphJson(
+          id,
+          accessToken,
+          graphCreativeUpdatePayload(payload),
+        );
         return { externalId: id, response: updated.json as JsonValue };
       }
       case "creative.delete": {
         const id = requireTargetId(payload, "creativeId", action);
-        const deleted = await postGraphJson(id, accessToken, { status: "DELETED" });
+        const deleted = await postGraphJson(id, accessToken, {
+          status: "DELETED",
+        });
         return { externalId: id, response: deleted.json as JsonValue };
       }
       case "ad.create": {
-        const created = await postGraphJson(`${adAccountId}/ads`, accessToken, graphAdCreatePayload(payload));
+        const created = await postGraphJson(
+          `${adAccountId}/ads`,
+          accessToken,
+          graphAdCreatePayload(payload),
+        );
         return requireGraphId(created.json, "ad.create");
       }
       case "ad.update":
       case "ad.status": {
         const id = requireTargetId(payload, "adId", action);
-        const updated = await postGraphJson(id, accessToken, graphUpdatePayload(payload, accountCurrency));
+        const updated = await postGraphJson(
+          id,
+          accessToken,
+          graphUpdatePayload(payload, accountCurrency),
+        );
         return { externalId: id, response: updated.json as JsonValue };
       }
       case "ad.delete": {
         const id = requireTargetId(payload, "adId", action);
-        const deleted = await postGraphJson(id, accessToken, { status: "DELETED" });
+        const deleted = await postGraphJson(id, accessToken, {
+          status: "DELETED",
+        });
         return { externalId: id, response: deleted.json as JsonValue };
       }
       default:
@@ -1736,13 +2106,68 @@ export class GraphApplyExecutor implements MetaActionExecutor {
     payload: Record<string, unknown>;
     accessToken: string;
     adAccountId: string;
-  }): Promise<{ externalId?: string; response: JsonValue; preflight?: JsonValue }> {
+  }): Promise<{
+    externalId?: string;
+    response: JsonValue;
+    preflight?: JsonValue;
+  }> {
     const { action, payload, accessToken, adAccountId } = input;
     const pageId = readGraphString(payload, "pageId");
     const instagramUserId = readGraphString(payload, "instagramUserId");
+    if (isCarouselCreative(payload)) {
+      const cards = requireCarouselCards(payload);
+      const preflight = await fetchMetaAssetReadiness({
+        accessToken,
+        adAccountId,
+        pageId: pageId ?? undefined,
+        instagramUserId: instagramUserId ?? undefined,
+        limit: 100,
+      });
+      const imageHashes: string[] = [];
+      for (const card of cards) {
+        const uploaded = await postGraphMultipart(
+          `${adAccountId}/adimages`,
+          accessToken,
+          {},
+          { field: "source", path: fileArg(card.storageKey) },
+        );
+        const imageHash = extractImageHash(uploaded.json);
+        if (!imageHash) {
+          throw new MetaGraphApplyError({
+            message: `Meta Graph adimages response did not include an image hash for carousel card ${card.position}`,
+            exitClass: "unknown_error",
+            status: uploaded.status,
+            payload: uploaded.json as JsonValue,
+          });
+        }
+        imageHashes.push(imageHash);
+      }
+      const objectStorySpec = buildGraphCarouselObjectStorySpec(
+        payload,
+        cards,
+        imageHashes,
+      );
+      const created = await postGraphJson(
+        `${adAccountId}/adcreatives`,
+        accessToken,
+        graphCreativeCreatePayload(payload, {
+          name:
+            readGraphString(payload, "name") ??
+            action.entity?.nodeKey ??
+            action.ref ??
+            "AdDroid Carousel Creative",
+          object_story_spec: objectStorySpec,
+        }),
+      );
+      return {
+        ...requireGraphId(created.json, "creative.create"),
+        preflight: preflight as unknown as JsonValue,
+      };
+    }
     let imageHash = readGraphString(payload, "imageHash");
     const storageKey = readGraphString(payload, "storageKey");
-    const storagePath = !imageHash && storageKey ? fileArg(storageKey) : undefined;
+    const storagePath =
+      !imageHash && storageKey ? fileArg(storageKey) : undefined;
     const preflight = await fetchMetaAssetReadiness({
       accessToken,
       adAccountId,
@@ -1755,7 +2180,7 @@ export class GraphApplyExecutor implements MetaActionExecutor {
         `${adAccountId}/adimages`,
         accessToken,
         {},
-        { field: "source", path: storagePath }
+        { field: "source", path: storagePath },
       );
       imageHash = extractImageHash(uploaded.json) ?? undefined;
     }
@@ -1765,20 +2190,37 @@ export class GraphApplyExecutor implements MetaActionExecutor {
       isRecord(graphPayload.object_story_spec) ||
       isRecord(payload.assetFeedSpec) ||
       isRecord(graphPayload.asset_feed_spec) ||
-      Boolean(readGraphString(payload, "videoId") ?? (typeof graphPayload.video_id === "string" ? graphPayload.video_id : null));
-    const objectStorySpec =
-      isRecord(payload.objectStorySpec)
-        ? payload.objectStorySpec
-        : isRecord(graphPayload.object_story_spec)
-          ? undefined
-          : hasExplicitCreativeGraphShape
-            ? removeUndefinedGraph({ page_id: readGraphString(payload, "pageId") })
-            : buildGraphImageObjectStorySpec(payload, imageHash);
-    const created = await postGraphJson(`${adAccountId}/adcreatives`, accessToken, graphCreativeCreatePayload(payload, {
-      name: readGraphString(payload, "name") ?? action.entity?.nodeKey ?? action.ref ?? "AdDroid Creative",
-      object_story_spec: objectStorySpec,
-    }));
-    return { ...requireGraphId(created.json, "creative.create"), preflight: preflight as unknown as JsonValue };
+      Boolean(
+        readGraphString(payload, "videoId") ??
+        (typeof graphPayload.video_id === "string"
+          ? graphPayload.video_id
+          : null),
+      );
+    const objectStorySpec = isRecord(payload.objectStorySpec)
+      ? payload.objectStorySpec
+      : isRecord(graphPayload.object_story_spec)
+        ? undefined
+        : hasExplicitCreativeGraphShape
+          ? removeUndefinedGraph({
+              page_id: readGraphString(payload, "pageId"),
+            })
+          : buildGraphImageObjectStorySpec(payload, imageHash);
+    const created = await postGraphJson(
+      `${adAccountId}/adcreatives`,
+      accessToken,
+      graphCreativeCreatePayload(payload, {
+        name:
+          readGraphString(payload, "name") ??
+          action.entity?.nodeKey ??
+          action.ref ??
+          "AdDroid Creative",
+        object_story_spec: objectStorySpec,
+      }),
+    );
+    return {
+      ...requireGraphId(created.json, "creative.create"),
+      preflight: preflight as unknown as JsonValue,
+    };
   }
 
   private toGraphAction(action: ApplyAction): GraphOperationAction | null {
@@ -1789,8 +2231,14 @@ export class GraphApplyExecutor implements MetaActionExecutor {
   private rememberRef(action: GraphOperationAction, externalId: string): void {
     if (action.ref) this.refs.set(action.ref, externalId);
     if (action.entity?.nodeType && action.entity.nodeKey) {
-      this.refs.set(`${action.entity.nodeType}:${action.entity.nodeKey}`, externalId);
-      this.refs.set(`{{${action.entity.nodeType}:${action.entity.nodeKey}}}`, externalId);
+      this.refs.set(
+        `${action.entity.nodeType}:${action.entity.nodeKey}`,
+        externalId,
+      );
+      this.refs.set(
+        `{{${action.entity.nodeType}:${action.entity.nodeKey}}}`,
+        externalId,
+      );
     }
   }
 }
@@ -1812,13 +2260,35 @@ function legacyActionToGraph(action: ApplyAction): GraphOperationAction | null {
           specialAdCategories: ["NONE"],
           ...(action.budget ?? {}),
         },
-        entity: { nodeType: "campaign", nodeKey: String(action.campaignId), displayName: String(action.name ?? action.campaignId), status: normalizeGraphEntityStatus(action.initialState) },
+        entity: {
+          nodeType: "campaign",
+          nodeKey: String(action.campaignId),
+          displayName: String(action.name ?? action.campaignId),
+          status: normalizeGraphEntityStatus(action.initialState),
+        },
         externalIdRequired: true,
       };
     case "update_campaign":
-      return { kind: "campaign.update", account, payload: { campaignId: action.campaignId, ...changesToPayload(action.changes) }, entity: { nodeType: "campaign", nodeKey: String(action.campaignId) } };
+      return {
+        kind: "campaign.update",
+        account,
+        payload: {
+          campaignId: action.campaignId,
+          ...changesToPayload(action.changes),
+        },
+        entity: { nodeType: "campaign", nodeKey: String(action.campaignId) },
+      };
     case "delete_campaign":
-      return { kind: "campaign.delete", account, payload: { campaignId: action.campaignId }, entity: { nodeType: "campaign", nodeKey: String(action.campaignId), status: "archived" } };
+      return {
+        kind: "campaign.delete",
+        account,
+        payload: { campaignId: action.campaignId },
+        entity: {
+          nodeType: "campaign",
+          nodeKey: String(action.campaignId),
+          status: "archived",
+        },
+      };
     case "create_adset":
       return {
         kind: "adset.create",
@@ -1839,26 +2309,72 @@ function legacyActionToGraph(action: ApplyAction): GraphOperationAction | null {
           pixelId: action.pixelId,
           customEventType: action.customEventType,
         },
-        entity: { nodeType: "adset", nodeKey: String(action.adsetId), displayName: String(action.name ?? action.adsetId), parentNodeType: "campaign", parentNodeKey: String(action.campaignId), status: normalizeGraphEntityStatus(action.initialState) },
+        entity: {
+          nodeType: "adset",
+          nodeKey: String(action.adsetId),
+          displayName: String(action.name ?? action.adsetId),
+          parentNodeType: "campaign",
+          parentNodeKey: String(action.campaignId),
+          status: normalizeGraphEntityStatus(action.initialState),
+        },
         externalIdRequired: true,
       };
     case "update_adset":
-      return { kind: "adset.update", account, payload: { adsetId: action.adsetId, ...changesToPayload(action.changes) }, entity: { nodeType: "adset", nodeKey: String(action.adsetId), parentNodeType: "campaign", parentNodeKey: String(action.campaignId) } };
+      return {
+        kind: "adset.update",
+        account,
+        payload: {
+          adsetId: action.adsetId,
+          ...changesToPayload(action.changes),
+        },
+        entity: {
+          nodeType: "adset",
+          nodeKey: String(action.adsetId),
+          parentNodeType: "campaign",
+          parentNodeKey: String(action.campaignId),
+        },
+      };
     case "delete_adset":
-      return { kind: "adset.delete", account, payload: { adsetId: action.adsetId }, entity: { nodeType: "adset", nodeKey: String(action.adsetId), status: "archived" } };
+      return {
+        kind: "adset.delete",
+        account,
+        payload: { adsetId: action.adsetId },
+        entity: {
+          nodeType: "adset",
+          nodeKey: String(action.adsetId),
+          status: "archived",
+        },
+      };
     case "create_creative":
       return {
         kind: "creative.create",
         account,
         ref: `creative:${action.creativeId}`,
         payload: { ...action, creativeId: action.creativeId },
-        entity: { nodeType: "creative", nodeKey: String(action.creativeId), displayName: String(action.name ?? action.creativeId) },
+        entity: {
+          nodeType: "creative",
+          nodeKey: String(action.creativeId),
+          displayName: String(action.name ?? action.creativeId),
+        },
         externalIdRequired: true,
       };
     case "update_creative":
-      return { kind: "creative.update", account, payload: { creativeId: action.creativeId, ...changesToPayload(action.changes) }, entity: { nodeType: "creative", nodeKey: String(action.creativeId) } };
+      return {
+        kind: "creative.update",
+        account,
+        payload: {
+          creativeId: action.creativeId,
+          ...changesToPayload(action.changes),
+        },
+        entity: { nodeType: "creative", nodeKey: String(action.creativeId) },
+      };
     case "delete_creative":
-      return { kind: "creative.delete", account, payload: { creativeId: action.creativeId }, entity: { nodeType: "creative", nodeKey: String(action.creativeId) } };
+      return {
+        kind: "creative.delete",
+        account,
+        payload: { creativeId: action.creativeId },
+        entity: { nodeType: "creative", nodeKey: String(action.creativeId) },
+      };
     case "create_ad":
       return {
         kind: "ad.create",
@@ -1873,13 +2389,39 @@ function legacyActionToGraph(action: ApplyAction): GraphOperationAction | null {
           trackingSpecs: action.trackingSpecs,
           pixelId: action.pixelId,
         },
-        entity: { nodeType: "ad", nodeKey: String(action.adId), displayName: String(action.name ?? action.adId), parentNodeType: "adset", parentNodeKey: String(action.adsetId), status: normalizeGraphEntityStatus(action.initialState) },
+        entity: {
+          nodeType: "ad",
+          nodeKey: String(action.adId),
+          displayName: String(action.name ?? action.adId),
+          parentNodeType: "adset",
+          parentNodeKey: String(action.adsetId),
+          status: normalizeGraphEntityStatus(action.initialState),
+        },
         externalIdRequired: true,
       };
     case "update_ad":
-      return { kind: "ad.update", account, payload: { adId: action.adId, ...changesToPayload(action.changes) }, entity: { nodeType: "ad", nodeKey: String(action.adId), parentNodeType: "adset", parentNodeKey: String(action.adsetId) } };
+      return {
+        kind: "ad.update",
+        account,
+        payload: { adId: action.adId, ...changesToPayload(action.changes) },
+        entity: {
+          nodeType: "ad",
+          nodeKey: String(action.adId),
+          parentNodeType: "adset",
+          parentNodeKey: String(action.adsetId),
+        },
+      };
     case "delete_ad":
-      return { kind: "ad.delete", account, payload: { adId: action.adId }, entity: { nodeType: "ad", nodeKey: String(action.adId), status: "archived" } };
+      return {
+        kind: "ad.delete",
+        account,
+        payload: { adId: action.adId },
+        entity: {
+          nodeType: "ad",
+          nodeKey: String(action.adId),
+          status: "archived",
+        },
+      };
     default:
       return null;
   }
@@ -1895,18 +2437,26 @@ function changesToPayload(changes: unknown): Record<string, unknown> {
   return out;
 }
 
-function resolvePayloadRefs(payload: Record<string, unknown>, refs: Map<string, string>): Record<string, unknown> {
+function resolvePayloadRefs(
+  payload: Record<string, unknown>,
+  refs: Map<string, string>,
+): Record<string, unknown> {
   return resolveGraphRefsDeep(payload, refs) as Record<string, unknown>;
 }
 
-function resolveGraphRefsDeep(value: unknown, refs: Map<string, string>): unknown {
+function resolveGraphRefsDeep(
+  value: unknown,
+  refs: Map<string, string>,
+): unknown {
   if (typeof value === "string") {
     return refs.get(value) ?? refs.get(stripOperationRef(value)) ?? value;
   }
-  if (Array.isArray(value)) return value.map((item) => resolveGraphRefsDeep(item, refs));
+  if (Array.isArray(value))
+    return value.map((item) => resolveGraphRefsDeep(item, refs));
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(value)) out[key] = resolveGraphRefsDeep(item, refs);
+    for (const [key, item] of Object.entries(value))
+      out[key] = resolveGraphRefsDeep(item, refs);
     return out;
   }
   return value;
@@ -1917,28 +2467,36 @@ function stripOperationRef(value: string): string {
   return match?.[1] ?? value;
 }
 
-function graphCampaignCreatePayload(payload: Record<string, unknown>, accountCurrency: string): Record<string, unknown> {
+function graphCampaignCreatePayload(
+  payload: Record<string, unknown>,
+  accountCurrency: string,
+): Record<string, unknown> {
   return mergeGraphPayload(payload, {
     name: readGraphString(payload, "name"),
     objective: readGraphString(payload, "objective"),
     status: readGraphString(payload, "status") ?? "PAUSED",
     buying_type: readGraphString(payload, "buyingType"),
     special_ad_categories: payload.specialAdCategories,
-    special_ad_category_country: payload.specialAdCategoryCountry ?? payload.specialAdCategoryCountries,
+    special_ad_category_country:
+      payload.specialAdCategoryCountry ?? payload.specialAdCategoryCountries,
     daily_budget: moneyField(payload.dailyBudget, accountCurrency),
     lifetime_budget: moneyField(payload.lifetimeBudget, accountCurrency),
     bid_strategy: readGraphString(payload, "bidStrategy"),
     spend_cap: moneyField(payload.spendCap, accountCurrency),
     start_time: readGraphString(payload, "startTime"),
     stop_time: readGraphString(payload, "stopTime"),
-    is_adset_budget_sharing_enabled: payload.isAdsetBudgetSharingEnabled ?? payload.adsetBudgetSharing,
+    is_adset_budget_sharing_enabled:
+      payload.isAdsetBudgetSharingEnabled ?? payload.adsetBudgetSharing,
     pacing_type: payload.pacingType,
     smart_promotion_type: readGraphString(payload, "smartPromotionType"),
     promoted_object: payload.promotedObject,
   });
 }
 
-function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurrency: string): Record<string, unknown> {
+function graphAdsetCreatePayload(
+  payload: Record<string, unknown>,
+  accountCurrency: string,
+): Record<string, unknown> {
   const countries = readCountriesFromPayload(payload);
   const targeting = isRecord(payload.targeting)
     ? payload.targeting
@@ -1949,7 +2507,9 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
     ? payload.promotedObject
     : buildPromotedObject(payload);
   return mergeGraphPayload(payload, {
-    campaign_id: readGraphString(payload, "campaignId") ?? readGraphString(payload, "campaignRef"),
+    campaign_id:
+      readGraphString(payload, "campaignId") ??
+      readGraphString(payload, "campaignRef"),
     name: readGraphString(payload, "name"),
     status: readGraphString(payload, "status") ?? "PAUSED",
     optimization_goal: readGraphString(payload, "optimizationGoal"),
@@ -1963,7 +2523,8 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
     start_time: readGraphString(payload, "startTime"),
     end_time: readGraphString(payload, "endTime"),
     targeting,
-    promoted_object: Object.keys(promotedObject).length > 0 ? promotedObject : undefined,
+    promoted_object:
+      Object.keys(promotedObject).length > 0 ? promotedObject : undefined,
     destination_type: readGraphString(payload, "destinationType"),
     attribution_spec: payload.attributionSpec,
     frequency_control_specs: payload.frequencyControlSpecs,
@@ -1971,8 +2532,14 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
     pacing_type: payload.pacingType,
     daily_spend_cap: moneyField(payload.dailySpendCap, accountCurrency),
     lifetime_spend_cap: moneyField(payload.lifetimeSpendCap, accountCurrency),
-    daily_min_spend_target: moneyField(payload.dailyMinSpendTarget, accountCurrency),
-    lifetime_min_spend_target: moneyField(payload.lifetimeMinSpendTarget, accountCurrency),
+    daily_min_spend_target: moneyField(
+      payload.dailyMinSpendTarget,
+      accountCurrency,
+    ),
+    lifetime_min_spend_target: moneyField(
+      payload.lifetimeMinSpendTarget,
+      accountCurrency,
+    ),
     is_dynamic_creative: payload.isDynamicCreative,
     asset_feed_id: readGraphString(payload, "assetFeedId"),
     dsa_beneficiary: readGraphString(payload, "dsaBeneficiary"),
@@ -1981,10 +2548,16 @@ function graphAdsetCreatePayload(payload: Record<string, unknown>, accountCurren
   });
 }
 
-function graphAdCreatePayload(payload: Record<string, unknown>): Record<string, unknown> {
-  const creativeId = readGraphString(payload, "creativeId") ?? readGraphString(payload, "creativeRef");
+function graphAdCreatePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const creativeId =
+    readGraphString(payload, "creativeId") ??
+    readGraphString(payload, "creativeRef");
   return mergeGraphPayload(payload, {
-    adset_id: readGraphString(payload, "adsetId") ?? readGraphString(payload, "adsetRef"),
+    adset_id:
+      readGraphString(payload, "adsetId") ??
+      readGraphString(payload, "adsetRef"),
     name: readGraphString(payload, "name"),
     creative: creativeId ? { creative_id: creativeId } : undefined,
     status: readGraphString(payload, "status") ?? "PAUSED",
@@ -2000,7 +2573,10 @@ function graphAdCreatePayload(payload: Record<string, unknown>): Record<string, 
   });
 }
 
-function graphUpdatePayload(payload: Record<string, unknown>, accountCurrency: string): Record<string, unknown> {
+function graphUpdatePayload(
+  payload: Record<string, unknown>,
+  accountCurrency: string,
+): Record<string, unknown> {
   return mergeGraphPayload(payload, {
     name: readGraphString(payload, "name"),
     status: readGraphString(payload, "status"),
@@ -2020,18 +2596,22 @@ function graphUpdatePayload(payload: Record<string, unknown>, accountCurrency: s
   });
 }
 
-function graphCreativeUpdatePayload(payload: Record<string, unknown>): Record<string, unknown> {
+function graphCreativeUpdatePayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   return mergeGraphPayload(payload, {
     name: readGraphString(payload, "name"),
     title: readGraphString(payload, "title"),
-    body: readGraphString(payload, "body") ?? readGraphString(payload, "primaryText"),
+    body:
+      readGraphString(payload, "body") ??
+      readGraphString(payload, "primaryText"),
     url_tags: readGraphString(payload, "urlTags"),
   });
 }
 
 function graphCreativeCreatePayload(
   payload: Record<string, unknown>,
-  base: Record<string, unknown>
+  base: Record<string, unknown>,
 ): Record<string, unknown> {
   return mergeGraphPayload(payload, {
     ...base,
@@ -2048,7 +2628,10 @@ function graphCreativeCreatePayload(
     destination_set_id: readGraphString(payload, "destinationSetId"),
     authorization_category: readGraphString(payload, "authorizationCategory"),
     ad_disclaimer_spec: payload.adDisclaimerSpec,
-    branded_content_sponsor_page_id: readGraphString(payload, "brandedContentSponsorPageId"),
+    branded_content_sponsor_page_id: readGraphString(
+      payload,
+      "brandedContentSponsorPageId",
+    ),
   });
 }
 
@@ -2066,7 +2649,7 @@ const TOP_LEVEL_GRAPH_PAYLOAD_DENYLIST = new Set([
 
 function mergeGraphPayload(
   payload: Record<string, unknown>,
-  typedPayload: Record<string, unknown>
+  typedPayload: Record<string, unknown>,
 ): Record<string, unknown> {
   return removeUndefinedGraph({
     ...typedPayload,
@@ -2086,7 +2669,8 @@ function sanitizeGraphPayload(value: unknown): Record<string, unknown> {
 
 function sanitizeGraphPayloadValue(value: unknown, key: string): unknown {
   if (key === "access_token") return undefined;
-  if (Array.isArray(value)) return value.map((item) => sanitizeGraphPayloadValue(item, ""));
+  if (Array.isArray(value))
+    return value.map((item) => sanitizeGraphPayloadValue(item, ""));
   if (isRecord(value)) {
     const out: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
@@ -2098,7 +2682,9 @@ function sanitizeGraphPayloadValue(value: unknown, key: string): unknown {
   return value;
 }
 
-function buildPromotedObject(payload: Record<string, unknown>): Record<string, unknown> {
+function buildPromotedObject(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
   return removeUndefinedGraph({
     pixel_id: readGraphString(payload, "pixelId"),
     custom_event_type: readGraphString(payload, "customEventType"),
@@ -2108,46 +2694,157 @@ function buildPromotedObject(payload: Record<string, unknown>): Record<string, u
 
 function readCountriesFromPayload(payload: Record<string, unknown>): string[] {
   const targeting = payload.targeting;
-  if (isRecord(targeting) && isRecord(targeting.geo_locations) && Array.isArray(targeting.geo_locations.countries)) {
-    return targeting.geo_locations.countries.filter((v): v is string => typeof v === "string");
+  if (
+    isRecord(targeting) &&
+    isRecord(targeting.geo_locations) &&
+    Array.isArray(targeting.geo_locations.countries)
+  ) {
+    return targeting.geo_locations.countries.filter(
+      (v): v is string => typeof v === "string",
+    );
   }
   const countries = payload.countries;
-  return Array.isArray(countries) ? countries.filter((v): v is string => typeof v === "string") : [];
+  return Array.isArray(countries)
+    ? countries.filter((v): v is string => typeof v === "string")
+    : [];
 }
 
-function buildGraphImageObjectStorySpec(payload: Record<string, unknown>, imageHash: string | undefined): Record<string, unknown> {
+function buildGraphCarouselObjectStorySpec(
+  payload: Record<string, unknown>,
+  cards: readonly CarouselApplyCard[],
+  imageHashes: readonly string[],
+): Record<string, unknown> {
   const pageId = readGraphString(payload, "pageId");
-  const linkUrl = readGraphString(payload, "linkUrl");
-  if (!pageId) throw new MetaGraphApplyError({ message: "creative.create requires pageId", exitClass: "api_error" });
-  if (!linkUrl) throw new MetaGraphApplyError({ message: "creative.create image link ad requires linkUrl", exitClass: "api_error" });
-  if (!imageHash) throw new MetaGraphApplyError({ message: "creative.create requires imageHash or storageKey", exitClass: "api_error" });
+  const linkUrl =
+    readGraphString(payload, "linkUrl") ?? readGraphString(payload, "link_url");
+  if (!pageId)
+    throw new MetaGraphApplyError({
+      message: "creative.create carousel requires pageId",
+      exitClass: "api_error",
+    });
+  if (!linkUrl)
+    throw new MetaGraphApplyError({
+      message: "creative.create carousel requires linkUrl",
+      exitClass: "api_error",
+    });
+  if (cards.length !== imageHashes.length) {
+    throw new MetaGraphApplyError({
+      message: "carousel card count does not match uploaded image hashes",
+      exitClass: "api_error",
+    });
+  }
+  const childAttachments = cards.map((card, index) =>
+    removeUndefinedGraph({
+      image_hash: imageHashes[index],
+      name: card.headline,
+      description: card.description,
+      link: card.linkUrl ?? linkUrl,
+    }),
+  );
   const cta = readGraphString(payload, "callToAction");
-  const linkData: Record<string, unknown> = removeUndefinedGraph({
-    image_hash: imageHash,
+  const linkData = removeUndefinedGraph({
     link: linkUrl,
-    message: readGraphString(payload, "body") ?? readGraphString(payload, "primaryText") ?? "",
-    name: readGraphString(payload, "title") ?? readGraphString(payload, "headline"),
-    description: readGraphString(payload, "description"),
-    call_to_action: cta && cta !== "NO_BUTTON"
-      ? { type: cta, value: removeUndefinedGraph({ link: linkUrl, app_link: readGraphString(payload, "instagramAppLink") }) }
-      : undefined,
+    message:
+      readGraphString(payload, "body") ??
+      readGraphString(payload, "primaryText") ??
+      readGraphString(payload, "message") ??
+      "",
+    child_attachments: childAttachments,
+    call_to_action:
+      cta && cta !== "NO_BUTTON"
+        ? {
+            type: cta,
+            value: removeUndefinedGraph({
+              link: linkUrl,
+              app_link: readGraphString(payload, "instagramAppLink"),
+            }),
+          }
+        : undefined,
   });
   return removeUndefinedGraph({
     page_id: pageId,
-    instagram_user_id: readGraphString(payload, "instagramUserId") ?? readGraphString(payload, "instagramActorId"),
+    instagram_user_id:
+      readGraphString(payload, "instagramUserId") ??
+      readGraphString(payload, "instagramActorId"),
     link_data: linkData,
   });
 }
 
-function requireTargetId(payload: Record<string, unknown>, key: string, action: GraphOperationAction): string {
-  const id = readGraphString(payload, key) ?? readGraphString(payload, "id") ?? action.entity?.nodeKey ?? null;
+function buildGraphImageObjectStorySpec(
+  payload: Record<string, unknown>,
+  imageHash: string | undefined,
+): Record<string, unknown> {
+  const pageId = readGraphString(payload, "pageId");
+  const linkUrl = readGraphString(payload, "linkUrl");
+  if (!pageId)
+    throw new MetaGraphApplyError({
+      message: "creative.create requires pageId",
+      exitClass: "api_error",
+    });
+  if (!linkUrl)
+    throw new MetaGraphApplyError({
+      message: "creative.create image link ad requires linkUrl",
+      exitClass: "api_error",
+    });
+  if (!imageHash)
+    throw new MetaGraphApplyError({
+      message: "creative.create requires imageHash or storageKey",
+      exitClass: "api_error",
+    });
+  const cta = readGraphString(payload, "callToAction");
+  const linkData: Record<string, unknown> = removeUndefinedGraph({
+    image_hash: imageHash,
+    link: linkUrl,
+    message:
+      readGraphString(payload, "body") ??
+      readGraphString(payload, "primaryText") ??
+      "",
+    name:
+      readGraphString(payload, "title") ?? readGraphString(payload, "headline"),
+    description: readGraphString(payload, "description"),
+    call_to_action:
+      cta && cta !== "NO_BUTTON"
+        ? {
+            type: cta,
+            value: removeUndefinedGraph({
+              link: linkUrl,
+              app_link: readGraphString(payload, "instagramAppLink"),
+            }),
+          }
+        : undefined,
+  });
+  return removeUndefinedGraph({
+    page_id: pageId,
+    instagram_user_id:
+      readGraphString(payload, "instagramUserId") ??
+      readGraphString(payload, "instagramActorId"),
+    link_data: linkData,
+  });
+}
+
+function requireTargetId(
+  payload: Record<string, unknown>,
+  key: string,
+  action: GraphOperationAction,
+): string {
+  const id =
+    readGraphString(payload, key) ??
+    readGraphString(payload, "id") ??
+    action.entity?.nodeKey ??
+    null;
   if (!id) {
-    throw new MetaGraphApplyError({ message: `${action.kind} requires ${key}`, exitClass: "api_error" });
+    throw new MetaGraphApplyError({
+      message: `${action.kind} requires ${key}`,
+      exitClass: "api_error",
+    });
   }
   return id;
 }
 
-function requireGraphId(json: unknown, origin: string): { externalId: string; response: JsonValue } {
+function requireGraphId(
+  json: unknown,
+  origin: string,
+): { externalId: string; response: JsonValue } {
   const id = extractId(json);
   if (!id) {
     throw new MetaGraphApplyError({
@@ -2159,12 +2856,96 @@ function requireGraphId(json: unknown, origin: string): { externalId: string; re
   return { externalId: id, response: json as JsonValue };
 }
 
-function readGraphString(payload: Record<string, unknown>, key: string): string | undefined {
+function isCarouselCreative(value: Record<string, unknown>): boolean {
+  return (
+    readGraphString(value, "mediaType")?.toLowerCase() === "carousel" ||
+    readGraphString(value, "type")?.toLowerCase() === "carousel"
+  );
+}
+
+function requireCarouselCards(
+  value: Record<string, unknown>,
+): CarouselApplyCard[] {
+  const cards = Array.isArray(value.cards) ? value.cards : [];
+  if (cards.length < 2 || cards.length > 10) {
+    throw new MetaGraphApplyError({
+      message: "carousel creative requires 2-10 cards",
+      exitClass: "api_error",
+    });
+  }
+  return cards
+    .map((card, index) => normalizeCarouselApplyCard(card, index))
+    .sort((a, b) => a.position - b.position);
+}
+
+function normalizeCarouselApplyCard(
+  card: unknown,
+  index: number,
+): CarouselApplyCard {
+  if (!isRecord(card)) {
+    throw new MetaGraphApplyError({
+      message: `carousel card ${index + 1} must be an object`,
+      exitClass: "api_error",
+    });
+  }
+  const storageKey =
+    readGraphString(card, "storageKey") ??
+    readGraphString(card, "storage_key") ??
+    storageKeyFromRef(
+      readGraphString(card, "storageRef") ??
+        readGraphString(card, "storage_ref"),
+    );
+  if (!storageKey) {
+    throw new MetaGraphApplyError({
+      message: `carousel card ${index + 1} requires storage_ref or storageKey`,
+      exitClass: "api_error",
+    });
+  }
+  const headline = readGraphString(card, "headline");
+  if (!headline) {
+    throw new MetaGraphApplyError({
+      message: `carousel card ${index + 1} requires headline`,
+      exitClass: "api_error",
+    });
+  }
+  return {
+    position:
+      typeof card.position === "number" && Number.isFinite(card.position)
+        ? card.position
+        : index + 1,
+    storageKey,
+    headline,
+    ...(readGraphString(card, "description")
+      ? { description: readGraphString(card, "description") }
+      : {}),
+    ...((readGraphString(card, "linkUrl") ?? readGraphString(card, "link_url"))
+      ? {
+          linkUrl:
+            readGraphString(card, "linkUrl") ??
+            readGraphString(card, "link_url"),
+        }
+      : {}),
+  };
+}
+
+function storageKeyFromRef(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const prefix = "storage://";
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+
+function readGraphString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | undefined {
   const value = payload[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function moneyField(value: unknown, accountCurrency: string): string | undefined {
+function moneyField(
+  value: unknown,
+  accountCurrency: string,
+): string | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? amountToMinorUnits(value, accountCurrency)
     : typeof value === "string" && value.trim()
@@ -2172,7 +2953,9 @@ function moneyField(value: unknown, accountCurrency: string): string | undefined
       : undefined;
 }
 
-function removeUndefinedGraph(input: Record<string, unknown>): Record<string, unknown> {
+function removeUndefinedGraph(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (value !== undefined && value !== null) out[key] = value;
@@ -2182,7 +2965,8 @@ function removeUndefinedGraph(input: Record<string, unknown>): Record<string, un
 
 function normalizeGraphEntityStatus(value: unknown): string | undefined {
   const status = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (status === "active" || status === "paused" || status === "archived") return status;
+  if (status === "active" || status === "paused" || status === "archived")
+    return status;
   if (status === "deleted") return "archived";
   return undefined;
 }
@@ -2243,7 +3027,7 @@ export interface ApplyExecutorSelection {
  *   現時点では選択しない。
  */
 export async function resolveApplyExecutor(
-  opts: ResolveApplyExecutorOptions
+  opts: ResolveApplyExecutorOptions,
 ): Promise<ApplyExecutorSelection> {
   const env = opts.env ?? process.env;
   if (env.ADDROID_META_ADS_CLI_MOCK === "1") {
@@ -2256,8 +3040,12 @@ export async function resolveApplyExecutor(
   }
   const graphExecutor = new GraphApplyExecutor({
     metaAdapter: opts.metaAdapter,
-    ...(opts.resolveAdAccountId ? { resolveAdAccountId: opts.resolveAdAccountId } : {}),
-    ...(opts.resolveAdAccountCurrency ? { resolveAdAccountCurrency: opts.resolveAdAccountCurrency } : {}),
+    ...(opts.resolveAdAccountId
+      ? { resolveAdAccountId: opts.resolveAdAccountId }
+      : {}),
+    ...(opts.resolveAdAccountCurrency
+      ? { resolveAdAccountCurrency: opts.resolveAdAccountCurrency }
+      : {}),
   });
   return {
     executor: graphExecutor,
@@ -2321,7 +3109,9 @@ export async function resolveApplyExecutor(
     executor: new CliApplyExecutor({
       runner,
       metaAdapter: adapter,
-      ...(opts.resolveAdAccountId ? { resolveAdAccountId: opts.resolveAdAccountId } : {}),
+      ...(opts.resolveAdAccountId
+        ? { resolveAdAccountId: opts.resolveAdAccountId }
+        : {}),
       ...(opts.resolveAdAccountCurrency
         ? { resolveAdAccountCurrency: opts.resolveAdAccountCurrency }
         : {}),
