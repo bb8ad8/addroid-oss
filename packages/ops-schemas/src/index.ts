@@ -92,6 +92,7 @@ export const CronEntrySchema = z
       "today_report",
       "budget_guard",
       "budget_rebalance",
+      "experiment_evaluate",
       "improvement_pr",
       "auto_creative_generation",
       "retention_sweep",

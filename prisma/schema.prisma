@@ -77,6 +77,7 @@ model Workspace {
   automationRuns   AutomationRun[]
   agentTasks       AgentTask[]
   agentTaskRuns    AgentTaskRun[]
+  experiments       Experiment[]
 
   @@map("workspaces")
 }
@@ -138,6 +139,7 @@ model AdAccount {
   insightRows          InsightRow[]
   automationRules      AutomationRule[]
   automationActions    AutomationAction[]
+  experiments          Experiment[]
 
   @@unique([workspaceId, key])
   @@unique([workspaceId, metaAccountId])
@@ -219,6 +221,41 @@ model PerformanceSnapshot {
   @@unique([accountId, nodeType, nodeKey, metricDate])
   @@index([accountId, metricDate])
   @@map("performance_snapshots")
+}
+
+// =====================================================================
+// 5c) experiments — 同一 adset 内の2広告を比較する最小A/Bテスト管理。
+//     Split Test API は使わず、performance_snapshots と GitOps PR だけで
+//     勝敗判定と敗者PAUSE提案を行う。
+// =====================================================================
+model Experiment {
+  id                       String   @id @default(cuid())
+  workspaceId              String
+  accountId                String
+  name                     String
+  hypothesis               String?
+  status                   String   @default("running") // running | concluded | cancelled | inconclusive
+  metric                   String   @default("ctr") // ctr | cvr
+  adsetNodeKey             String
+  variantAKey              String
+  variantBKey              String
+  startDate                DateTime @db.Date
+  minImpressionsPerVariant Int      @default(2000)
+  maxDurationDays          Int      @default(14)
+  conclusion               Json?
+  pullRequestId            String?
+  createdBy                String
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account     AdAccount          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pullRequest GithubPullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: SetNull)
+
+  @@unique([accountId, name])
+  @@index([workspaceId, status])
+  @@index([accountId, adsetNodeKey, status])
+  @@map("experiments")
 }
 
 // =====================================================================
@@ -356,6 +393,7 @@ model GithubPullRequest {
   applyJobs       ApplyJob[]
   approvalRecords ApprovalRecord[]
   creatives       Creative[]
+  experiments     Experiment[]
 
   @@unique([repoId, number])
   @@map("github_pull_requests")

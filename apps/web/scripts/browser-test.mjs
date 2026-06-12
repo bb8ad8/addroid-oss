@@ -98,6 +98,7 @@ const REQUIRED_NAV_HREFS = [
   "/plans",
   "/campaigns",
   "/improvements",
+  "/experiments",
   "/creatives",
   "/approvals",
   "/cron",
@@ -147,6 +148,11 @@ const SCENARIOS = [
     url: "/improvements",
     // PageHeader title + 自動実行 Panel (常時描画) + 安全ルール note (常時描画)。
     expectContains: ["改善提案", "自動実行の状態", "安全ルール"],
+  },
+  {
+    id: "experiments-workflow",
+    url: "/experiments",
+    expectContains: ["A/Bテスト", "実験登録", "実験一覧"],
   },
   {
     id: "creatives-library",

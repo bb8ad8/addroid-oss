@@ -437,6 +437,15 @@ function resolveTool(
         display: "configure budget guard",
         why: tool.why,
       };
+    case "create_experiment":
+      return {
+        tool: name,
+        command: null,
+        args: [],
+        toolArgs: tool.args,
+        display: "create A/B experiment",
+        why: tool.why,
+      };
     case "manage_schedule":
       return commandTool(name, "schedule", buildScheduleArgs(tool.args), tool.args, tool.why);
     case "show_logs":

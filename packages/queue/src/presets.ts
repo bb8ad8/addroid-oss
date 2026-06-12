@@ -48,6 +48,12 @@ export const CRON_PRESETS = [
     enabledByDefault: false,
   },
   {
+    name: "experiment_evaluate",
+    cron: "0 8 * * *",
+    description: "登録済みA/Bテストを毎朝評価し、勝敗確定時に敗者PAUSE提案PRを作成する",
+    enabledByDefault: false,
+  },
+  {
     name: "improvement_pr",
     cron: "0 10 * * 1",
     description:

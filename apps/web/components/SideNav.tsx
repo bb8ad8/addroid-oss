@@ -35,6 +35,7 @@ const groups: NavGroup[] = [
     labelKey: "nav.group.improve",
     items: [
       { href: "/improvements", labelKey: "nav.improvements" },
+      { href: "/experiments", labelKey: "nav.experiments" },
       { href: "/creatives", labelKey: "nav.creatives" },
       { href: "/creatives/submit", labelKey: "nav.creativeSubmit" },
     ],

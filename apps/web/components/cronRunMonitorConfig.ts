@@ -17,6 +17,7 @@ export function cronRunMonitorConfigForPreset(presetName: string): {
       return { pollIntervalMs: 3000, timeoutMs: 3 * MINUTE_MS };
     case "budget_guard":
     case "budget_rebalance":
+    case "experiment_evaluate":
       return { pollIntervalMs: 4000, timeoutMs: 8 * MINUTE_MS };
     case "retention_sweep":
       return { pollIntervalMs: 5000, timeoutMs: 10 * MINUTE_MS };

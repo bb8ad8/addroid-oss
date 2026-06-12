@@ -82,6 +82,20 @@ test("system prompt exposes scheduled task creation to chat surfaces only", () =
   );
 });
 
+test("system prompt exposes experiment registration to chat surfaces only", () => {
+  const context = {
+    content: "test agent context",
+    webUrl: "http://127.0.0.1:3000",
+    loadedDocs: ["test"],
+  };
+  assert.match(buildAgentSystemPrompt(context, "web-chat"), /create_experiment/);
+  assert.equal(isToolAllowedOnSurface("create_experiment", "cli-chat"), true);
+  assert.equal(isToolAllowedOnSurface("create_experiment", "web-chat"), true);
+  assert.equal(isToolAllowedOnSurface("create_experiment", "slack-chat"), true);
+  assert.equal(isToolAllowedOnSurface("create_experiment", "scheduled-agent"), false);
+  assert.doesNotMatch(buildAgentSystemPrompt(context, "scheduled-agent"), /create_experiment/);
+});
+
 test("system prompt exposes read-only Meta query and GitOps proposal to scheduled agents", () => {
   const context = {
     content: "test agent context",

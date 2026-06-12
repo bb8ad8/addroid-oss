@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 最小 A/B テスト管理
+
+- 同一広告セット内の2広告を比較する最小 A/B テスト管理として `experiments` モデル、`create_experiment` Agent tool、`experiment_evaluate` cron preset、`/experiments` 画面、敗者 PAUSE 提案 PR 作成を追加。
+
 ### Added — 予算再配分 PR
 
 - CPA 効率に基づく `budget_rebalance` cron preset、`workflows/budget-rebalance.yaml` policy、GitOps PR 提案、`/budget` の予算再配分ビューを追加。

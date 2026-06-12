@@ -351,6 +351,25 @@ export {
 } from "./budget-rebalance.js";
 
 export {
+  buildExperimentPausePullRequest,
+  judgeExperiment,
+  runExperimentEvaluateOnce,
+  type ExperimentEvaluateItemStatus,
+  type ExperimentEvaluateItemSummary,
+  type ExperimentEvaluateStore,
+  type ExperimentEvaluateSummary,
+  type ExperimentMetric,
+  type ExperimentPublisher,
+  type ExperimentPullRequestRecord,
+  type ExperimentPullRequestRequest,
+  type ExperimentRecord,
+  type ExperimentVariantState,
+  type ExperimentVariantStats,
+  type ExperimentVerdict,
+  type RunExperimentEvaluateOptions,
+} from "./experiments.js";
+
+export {
   DEFAULT_RETENTION_POLICY,
   runPerformanceSnapshotRetentionOnce,
   type PerformanceSnapshotRetentionStore,

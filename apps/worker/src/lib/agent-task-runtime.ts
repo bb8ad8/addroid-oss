@@ -68,6 +68,10 @@ import {
   type BudgetGuardPolicyConfigInput,
 } from "./budget-guard-policy-config.js";
 import {
+  createExperimentRegistration,
+  type CreateExperimentResult,
+} from "./experiment-registration.js";
+import {
   saveSubmissionGuardPolicyConfig,
   type SubmissionGuardPolicyConfigInput,
 } from "./submission-guard-policy-config.js";
@@ -475,6 +479,8 @@ export async function executeWorkerAgentTool(opts: {
         return await setScheduleEnabled({ ...opts, tool: readyTool });
       case "configure_budget_guard":
         return await configureBudgetGuard({ ...opts, tool: readyTool });
+      case "create_experiment":
+        return await createExperiment({ ...opts, tool: readyTool });
       case "configure_submission_guards":
         return await configureSubmissionGuards({ ...opts, tool: readyTool });
       case "manage_schedule":
@@ -992,6 +998,26 @@ async function configureBudgetGuard(opts: {
   };
 }
 
+async function createExperiment(opts: {
+  tool: Extract<AgentToolResult, { status: "ready" }>;
+  prisma: PrismaClient;
+  workspaceId: string;
+  actor?: string;
+}): Promise<{ display: string; status: string; message: string; data?: unknown }> {
+  const experiment: CreateExperimentResult = await createExperimentRegistration({
+    prisma: opts.prisma,
+    workspaceId: opts.workspaceId,
+    input: opts.tool.toolArgs,
+    actor: opts.actor ?? "agent:slack-chat",
+  });
+  return {
+    display: opts.tool.display,
+    status: "ok",
+    message: `A/Bテスト「${experiment.name}」を登録しました。experiment_evaluate が有効なら次回実行時に評価します。`,
+    data: { experiment },
+  };
+}
+
 async function configureSubmissionGuards(opts: {
   tool: Extract<AgentToolResult, { status: "ready" }>;
   prisma: PrismaClient;
@@ -1493,8 +1519,15 @@ function reportPreset(value: string): CronPresetName {
         ? "today_report"
         : v === "budget" || v === "budget_guard"
           ? "budget_guard"
-          : v === "rebalance" || v === "budget_rebalance" || v === "予算再配分"
-            ? "budget_rebalance"
+        : v === "rebalance" || v === "budget_rebalance" || v === "予算再配分"
+          ? "budget_rebalance"
+        : v === "experiment" ||
+            v === "experiments" ||
+            v === "ab" ||
+            v === "ab_test" ||
+            v === "experiment_evaluate" ||
+            v === "実験"
+          ? "experiment_evaluate"
         : v === "improvement" || v === "improvements" || v === "improvement_pr"
           ? "improvement_pr"
           : v === "creative" ||

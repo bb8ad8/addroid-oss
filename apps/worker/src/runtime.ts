@@ -22,6 +22,7 @@ import {
   runBudgetGuardOnce,
   runBudgetRebalanceOnce,
   runExecuteApply,
+  runExperimentEvaluateOnce,
   runGithubPollOnce,
   runImprovementPrOnce,
   runPerformanceSnapshotRetentionOnce,
@@ -33,6 +34,7 @@ import {
   type DailyReportSnapshotStore,
   type BudgetGuardSummary,
   type BudgetRebalanceSummary,
+  type ExperimentEvaluateSummary,
   type ImprovementPrAuditWriter,
   type ImprovementPrExecutionMode,
   type ImprovementPrSummary,
@@ -98,6 +100,10 @@ import {
   createPrismaBudgetRebalanceStore,
   loadBudgetRebalancePolicyForRoot,
 } from "./lib/budget-rebalance-runtime.js";
+import {
+  createExperimentGithubPublisher,
+  createPrismaExperimentEvaluateStore,
+} from "./lib/experiments-runtime.js";
 import {
   createImprovementPrAuditWriter,
   createImprovementPrGithubPublisher,
@@ -352,6 +358,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
   // factor out して、Slack command と各 cron handler から共有する。
   const budgetGuardStore = createPrismaBudgetGuardStore(prisma);
   const budgetRebalanceStore = createPrismaBudgetRebalanceStore(prisma);
+  const experimentEvaluateStore = createPrismaExperimentEvaluateStore(prisma);
   const improvementPrStore = createPrismaImprovementPrStore(prisma);
 
   // Regression fix: 契約上の retention 要件
@@ -879,6 +886,61 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
                   ? { note: "no active ad_accounts in workspace" }
                   : {}),
               });
+            }
+          } else if (presetName === "experiment_evaluate") {
+            const wsMode = await loadWorkspaceMode(prisma, workspace.id);
+            const publisher = createExperimentGithubPublisher({
+              prisma,
+              adapter: getGithubAdapter(),
+              workspaceId: workspace.id,
+            });
+            const wsForRepo = await prisma.workspace.findUnique({
+              where: { id: workspace.id },
+              select: { opsRepoId: true },
+            });
+            const repoRow = wsForRepo?.opsRepoId
+              ? await prisma.githubRepo.findUnique({
+                  where: { id: wsForRepo.opsRepoId },
+                  select: { owner: true, name: true, defaultBranch: true },
+                })
+              : null;
+            const summary = await runExperimentEvaluateOnce({
+              mode: resolveExecutionMode(wsMode, null),
+              store: experimentEvaluateStore,
+              publisher,
+              repo: repoRow ? `${repoRow.owner}/${repoRow.name}` : "",
+              baseRef: repoRow?.defaultBranch ?? "main",
+            });
+            const level: "info" | "warn" | "error" =
+              summary.status === "partial_failure" ? "error" : "info";
+            await cronStore.recordExecutionLog({
+              cronRunId: handle.cronRunId,
+              workspaceId: workspace.id,
+              kind: "cron",
+              refType: "cron_run",
+              refId: handle.cronRunId,
+              level,
+              message:
+                `experiment_evaluate: ${summary.status} ` +
+                `(evaluated=${summary.evaluated}, concluded=${summary.concluded}, ` +
+                `continued=${summary.continued}, cancelled=${summary.cancelled})`,
+              payload: experimentEvaluateSummaryToPayload(summary),
+            });
+            if (summary.status === "partial_failure") {
+              await failCronRun(
+                cronStore,
+                handle,
+                `experiment_evaluate had PR failures: ${summary.items
+                  .filter((item) => item.status === "pr_failed")
+                  .map((item) => `${item.name}: ${item.errorMessage ?? "pr failed"}`)
+                  .join("; ")}`
+              );
+            } else {
+              await finishCronRun(
+                cronStore,
+                handle,
+                experimentEvaluateSummaryToPayload(summary)
+              );
             }
           } else if (
             presetName === "improvement_pr" ||
@@ -1904,6 +1966,37 @@ function budgetRebalanceSummaryToPayload(summary: BudgetRebalanceSummary): JsonV
   };
   if (summary.errorMessage) payload.errorMessage = summary.errorMessage;
   return payload;
+}
+
+/**
+ * experiment_evaluate summary → execution_logs.payload / cron_runs.output。
+ */
+function experimentEvaluateSummaryToPayload(summary: ExperimentEvaluateSummary): JsonValue {
+  return {
+    status: summary.status,
+    evaluated: summary.evaluated,
+    continued: summary.continued,
+    concluded: summary.concluded,
+    inconclusive: summary.inconclusive,
+    cancelled: summary.cancelled,
+    prFailed: summary.prFailed,
+    items: summary.items.map((item) => ({
+      experimentId: item.experimentId,
+      name: item.name,
+      accountKey: item.accountKey,
+      status: item.status,
+      verdict: item.verdict ? (item.verdict as unknown as JsonValue) : null,
+      pullRequest: item.pullRequest
+        ? {
+            pullRequestId: item.pullRequest.pullRequestId,
+            prNumber: item.pullRequest.prNumber,
+            htmlUrl: item.pullRequest.htmlUrl,
+            headSha: item.pullRequest.headSha,
+          }
+        : null,
+      ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}),
+    })),
+  };
 }
 
 /**

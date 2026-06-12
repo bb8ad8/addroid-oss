@@ -82,6 +82,10 @@ import {
   type BudgetGuardPolicyConfigInput,
 } from "../../worker/src/lib/budget-guard-policy-config";
 import {
+  createExperimentRegistration,
+  type CreateExperimentResult,
+} from "../../worker/src/lib/experiment-registration";
+import {
   saveSubmissionGuardPolicyConfig,
   type SubmissionGuardPolicyConfigInput,
 } from "../../worker/src/lib/submission-guard-policy-config";
@@ -657,6 +661,8 @@ export async function executeWebAgentTool(
         return await setScheduleEnabledTool(tool.toolArgs, tool.display);
       case "configure_budget_guard":
         return await configureBudgetGuardTool(tool.toolArgs, tool.display, webUrl);
+      case "create_experiment":
+        return await createExperimentTool(workspaceId, tool.toolArgs, tool.display, "agent:web-chat");
       case "configure_submission_guards":
         return await configureSubmissionGuardsTool(tool.toolArgs, tool.display, webUrl);
       case "manage_schedule":
@@ -1914,6 +1920,26 @@ async function configureBudgetGuardTool(
   };
 }
 
+async function createExperimentTool(
+  workspaceId: string,
+  args: Record<string, unknown>,
+  display: string,
+  actor: string
+): Promise<WebAgentExecution> {
+  const experiment: CreateExperimentResult = await createExperimentRegistration({
+    prisma,
+    workspaceId,
+    input: args,
+    actor,
+  });
+  return {
+    display,
+    status: "ok",
+    message: `A/Bテスト「${experiment.name}」を登録しました。experiment_evaluate が有効なら次回実行時に評価します。`,
+    data: { experiment },
+  };
+}
+
 async function configureSubmissionGuardsTool(
   args: Record<string, unknown>,
   display: string,
@@ -2859,8 +2885,15 @@ function reportPreset(value: string): CronPresetName {
         ? "today_report"
         : v === "budget" || v === "budget_guard"
           ? "budget_guard"
-          : v === "rebalance" || v === "budget_rebalance" || v === "予算再配分"
-            ? "budget_rebalance"
+        : v === "rebalance" || v === "budget_rebalance" || v === "予算再配分"
+          ? "budget_rebalance"
+        : v === "experiment" ||
+            v === "experiments" ||
+            v === "ab" ||
+            v === "ab_test" ||
+            v === "experiment_evaluate" ||
+            v === "実験"
+          ? "experiment_evaluate"
         : v === "improvement" || v === "improvements" || v === "improvement_pr"
           ? "improvement_pr"
           : v === "creative" ||

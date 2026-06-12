@@ -114,7 +114,9 @@ export default async function CronSchedulesPage() {
       "daily_report",
       "today_report",
       "budget_guard",
+      "budget_rebalance",
       "improvement_pr",
+      "experiment_evaluate",
       "auto_creative_generation",
     ].includes(preset.name)
   );
@@ -311,8 +313,10 @@ function presetLabel(name: string): string {
     daily_report: "日次レポート",
     today_report: "当日レポート",
     budget_guard: "予算チェック",
+    budget_rebalance: "予算再配分",
     automation_rules: "自動運用ルール",
     improvement_pr: "改善提案",
+    experiment_evaluate: "A/Bテスト評価",
     auto_creative_generation: "自動クリエイティブ生成",
     github_poll: "承認済み変更の確認",
     retention_cleanup: "古い履歴の整理",
