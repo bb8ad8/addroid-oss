@@ -29,6 +29,7 @@ import {
   type DailyReportSnapshotStore,
   type PerformanceSnapshotUpsertInput,
   type PerformanceSnapshotUpsertResult,
+  type SnapshotSeriesRow,
 } from "@addroid/queue";
 
 // ---------------------------------------------------------------------
@@ -159,6 +160,54 @@ export function createPrismaDailyReportSnapshotStore(
       });
       return { id: created.id };
     },
+
+    async listSnapshotSeries(input): Promise<SnapshotSeriesRow[]> {
+      const rows = await prisma.performanceSnapshot.findMany({
+        where: {
+          accountId: input.accountId,
+          nodeType: { in: input.nodeTypes },
+          metricDate: {
+            gte: new Date(`${input.since}T00:00:00.000Z`),
+            lte: new Date(`${input.until}T00:00:00.000Z`),
+          },
+        },
+        select: {
+          nodeType: true,
+          nodeKey: true,
+          metricDate: true,
+          impressions: true,
+          clicks: true,
+          spendMicros: true,
+          conversions: true,
+          frequency: true,
+          raw: true,
+        },
+        orderBy: [{ nodeType: "asc" }, { nodeKey: "asc" }, { metricDate: "asc" }],
+      });
+      return rows.flatMap((row) => {
+        if (
+          row.nodeType !== "account" &&
+          row.nodeType !== "campaign" &&
+          row.nodeType !== "adset" &&
+          row.nodeType !== "ad"
+        ) {
+          return [];
+        }
+        return [
+          {
+            hierarchy: row.nodeType,
+            nodeKey: row.nodeKey,
+            displayName: displayNameFromRaw(row.raw, row.nodeKey),
+            metricDate: row.metricDate.toISOString().slice(0, 10),
+            spendMicros: row.spendMicros,
+            impressions: row.impressions,
+            clicks: row.clicks,
+            conversions: row.conversions,
+            frequency: decimalToNumber(row.frequency),
+          },
+        ];
+      });
+    },
   };
 }
 
@@ -191,6 +240,15 @@ export function createAnalystRunner(
           : {}),
         current: input.current,
         ...(input.prior ? { prior: input.prior } : {}),
+        ...(input.statisticalContext
+          ? { statisticalContext: input.statisticalContext }
+          : {}),
+        ...(input.anomalyFindings
+          ? { anomalyFindings: input.anomalyFindings }
+          : {}),
+        ...(typeof input.quietDay === "boolean"
+          ? { quietDay: input.quietDay }
+          : {}),
         snapshotIds: input.snapshotIds,
       };
       try {
@@ -252,6 +310,25 @@ export function createAnalystRunner(
       }
     },
   };
+}
+
+function decimalToNumber(
+  value: Prisma.Decimal | number | null
+): number | null {
+  if (value === null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const n = value.toNumber();
+  return Number.isFinite(n) ? n : null;
+}
+
+function displayNameFromRaw(raw: Prisma.JsonValue | null, fallback: string): string {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const value = (raw as Record<string, unknown>).displayName;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return fallback;
 }
 
 // ---------------------------------------------------------------------

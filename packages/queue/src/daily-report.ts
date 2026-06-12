@@ -34,6 +34,12 @@ import {
   selectAccountKpiSet,
   type BreakdownsPolicy,
 } from "./analytics.js";
+import {
+  detectAnomalies,
+  type AnomalyDetectionResult,
+  type AnomalyDetectionStore,
+  type NodeAnomalyFinding,
+} from "./anomaly-detection.js";
 import { deriveMetrics } from "./metrics.js";
 import {
   compareProportions,
@@ -157,7 +163,7 @@ export interface DailyReportAdAccountSnapshot {
   timezoneName?: string | null;
 }
 
-export interface DailyReportSnapshotStore {
+export interface DailyReportSnapshotStore extends AnomalyDetectionStore {
   /** 対象 workspace + accountKey の ad_account を返す。未登録なら null。 */
   findAdAccount(input: {
     workspaceId: string;
@@ -217,6 +223,8 @@ export interface DailyReportAnalystInput {
     qualityRankingSummary?: string;
   };
   statisticalContext?: DailyReportStatisticalContext;
+  anomalyFindings?: DailyReportAnomalyFinding[];
+  quietDay?: boolean;
   snapshotIds: string[];
 }
 
@@ -320,6 +328,18 @@ export interface DailyReportStatisticalContext {
   confidence: ConfidenceLabel;
 }
 
+export interface DailyReportAnomalyFinding {
+  hierarchy: string;
+  nodeKey: string;
+  displayName: string;
+  metric: string;
+  kind: string;
+  currentValue: number;
+  baselineValue: number;
+  relativeChange: number | null;
+  severity: string;
+}
+
 export interface DailyReportSummary {
   status: DailyReportRunStatus;
   workspaceId: string;
@@ -340,6 +360,10 @@ export interface DailyReportSummary {
   deltas: Record<string, string>;
   /** CTR/CVR の統計的比較とサンプル信頼ラベル。 */
   statisticalContext: DailyReportStatisticalContext;
+  /** LLM なしで検知した注目変化。UI と analyst 入力の根拠。 */
+  anomalies: AnomalyDetectionResult;
+  /** 異常検知に失敗し、従来 analyst 入力へフォールバックした場合の警告。 */
+  anomalyDetectionError?: string;
   /** 永続化された snapshot id 一覧 (4 階層)。 */
   snapshotIds: string[];
   /** AI コメント (analyst agent succeeded のみ非 null)。 */
@@ -365,6 +389,12 @@ const ZERO_KPIS: DailyReportKpiSet = Object.freeze({
   cv: 0,
   cpm: 0,
   frequency: null,
+});
+
+const EMPTY_ANOMALIES: AnomalyDetectionResult = Object.freeze({
+  findings: [],
+  evaluatedNodeCount: 0,
+  quietDay: true,
 });
 
 /**
@@ -407,6 +437,7 @@ export async function runDailyReportOnce(
       prior: ZERO_KPIS,
       deltas: {},
       statisticalContext: buildStatisticalContext(ZERO_KPIS, ZERO_KPIS),
+      anomalies: EMPTY_ANOMALIES,
       snapshotIds: [],
       aiCommentary: null,
       topImprovements: [],
@@ -505,6 +536,7 @@ export async function runDailyReportOnce(
       prior,
       deltas,
       statisticalContext,
+      anomalies: EMPTY_ANOMALIES,
       snapshotIds,
       aiCommentary: null,
       topImprovements: [],
@@ -512,6 +544,18 @@ export async function runDailyReportOnce(
       mode: opts.mode,
       errorMessage: insights.detail ?? "insights provider returned no rows for current period",
     };
+  }
+
+  let anomalies: AnomalyDetectionResult = EMPTY_ANOMALIES;
+  let anomalyDetectionError: string | undefined;
+  try {
+    anomalies = await detectAnomalies({
+      store: opts.store,
+      accountId: account.id,
+      targetDate: metricDate,
+    });
+  } catch (err) {
+    anomalyDetectionError = err instanceof Error ? err.message : String(err);
   }
 
   const analystInput: DailyReportAnalystInput = {
@@ -526,6 +570,10 @@ export async function runDailyReportOnce(
   };
   if (priorSelection.source !== "none") {
     analystInput.prior = kpiSetToAnalystMetrics(prior);
+  }
+  if (!anomalyDetectionError) {
+    analystInput.anomalyFindings = anomalies.findings.map(anomalyFindingForAnalyst);
+    analystInput.quietDay = anomalies.quietDay;
   }
 
   const analystResult = await opts.analyst.run(analystInput);
@@ -546,6 +594,8 @@ export async function runDailyReportOnce(
       prior,
       deltas,
       statisticalContext,
+      anomalies,
+      ...(anomalyDetectionError ? { anomalyDetectionError } : {}),
       snapshotIds,
       aiCommentary: null,
       topImprovements: [],
@@ -579,11 +629,27 @@ export async function runDailyReportOnce(
     prior,
     deltas: mergedDeltas,
     statisticalContext,
+    anomalies,
+    ...(anomalyDetectionError ? { anomalyDetectionError } : {}),
     snapshotIds,
     aiCommentary: analystResult.output.commentary,
     topImprovements: top,
     aiRunId: aiRunRow.id,
     mode: opts.mode,
+  };
+}
+
+function anomalyFindingForAnalyst(finding: NodeAnomalyFinding): DailyReportAnomalyFinding {
+  return {
+    hierarchy: finding.hierarchy,
+    nodeKey: finding.nodeKey,
+    displayName: finding.displayName,
+    metric: finding.metric,
+    kind: finding.kind,
+    currentValue: finding.currentValue,
+    baselineValue: finding.baselineValue,
+    relativeChange: finding.relativeChange,
+    severity: finding.severity,
   };
 }
 

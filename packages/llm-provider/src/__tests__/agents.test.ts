@@ -1098,6 +1098,61 @@ test("buildAnalystAgentPrompt uses analyst system prompt", () => {
   assert.match(ANALYST_AGENT_SYSTEM_PROMPT, /media_buyer/);
 });
 
+test("buildAnalystAgentPrompt includes anomaly findings and quiet-day instructions", () => {
+  const prompt = buildAnalystAgentPrompt({
+    accountId: "a",
+    periodStart: "2026-04-25",
+    periodEnd: "2026-04-30",
+    snapshotIds: ["snap-1"],
+    current: { spend: 100, impressions: 1000, clicks: 20, conversions: 3 },
+    anomalyFindings: [
+      {
+        hierarchy: "campaign",
+        nodeKey: "cmp_1",
+        displayName: "Campaign 1",
+        metric: "spend",
+        kind: "spike",
+        currentValue: 180,
+        baselineValue: 100,
+        relativeChange: 0.8,
+        severity: "high",
+      },
+    ],
+    quietDay: false,
+  });
+  assert.match(ANALYST_AGENT_SYSTEM_PROMPT, /anomalyFindings/);
+  assert.match(ANALYST_AGENT_SYSTEM_PROMPT, /quietDay/);
+  assert.match(String(prompt[1]!.content), /cmp_1/);
+  assert.match(String(prompt[1]!.content), /spike/);
+});
+
+test("runAnalystAgent: quietDay accepts empty topImprovements", async () => {
+  const provider = await connectedMockProvider({
+    responder: () =>
+      JSON.stringify({
+        commentary: "特筆すべき変化はありません。",
+        deltas: {},
+        topImprovements: [],
+        decision: "report_only",
+        confidence: 0.7,
+      }),
+  });
+  const result = await runAnalystAgent(
+    baseCtx(provider, { workflow: "daily_report" }),
+    {
+      accountId: "a",
+      periodStart: "2026-04-25",
+      periodEnd: "2026-04-30",
+      snapshotIds: [],
+      current: { spend: 0, impressions: 0, clicks: 0, conversions: 0 },
+      quietDay: true,
+      anomalyFindings: [],
+    },
+  );
+  assert.equal(result.error, null);
+  assert.deepEqual(result.output?.topImprovements, []);
+});
+
 // ===========================================================================
 // 6) Media Buyer
 // ===========================================================================

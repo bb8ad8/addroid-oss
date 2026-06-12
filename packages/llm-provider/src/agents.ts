@@ -1288,6 +1288,18 @@ export interface AnalystAgentInput {
     }>;
     confidence: "reliable" | "indicative" | "insufficient";
   };
+  anomalyFindings?: Array<{
+    hierarchy: string;
+    nodeKey: string;
+    displayName: string;
+    metric: string;
+    kind: string;
+    currentValue: number;
+    baselineValue: number;
+    relativeChange: number | null;
+    severity: string;
+  }>;
+  quietDay?: boolean;
   /** 紐付く performance_snapshots の id 配列 (account/campaign/adset/ad)。 */
   snapshotIds: string[];
 }
@@ -1319,6 +1331,9 @@ export const ANALYST_AGENT_SYSTEM_PROMPT = [
   "Treat ranking diagnostics as supporting evidence only; keep deterministic KPI math in the provided metrics.",
   "When statisticalContext is present, do not describe not_significant or insufficient_data changes as proven improvements or declines.",
   "If statisticalContext.confidence is insufficient, explicitly mention that sample size is too small for a firm conclusion.",
+  "When anomalyFindings is present, focus only on interpreting those findings and generating causal hypotheses. Do not invent changes that are not listed in anomalyFindings.",
+  "When quietDay is true, clearly state that there were no noteworthy deterministic changes. Do not force improvement ideas; topImprovements may be an empty array.",
+  "Base topImprovements on anomalyFindings when they are provided.",
   "",
   "Respond with a single JSON object using exactly these fields:",
   "  commentary:       string (1 short paragraph, plain prose)",

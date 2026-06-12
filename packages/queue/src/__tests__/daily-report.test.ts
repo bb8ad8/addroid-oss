@@ -26,6 +26,7 @@ import {
   type DailyReportSnapshotStore,
   type PerformanceSnapshotUpsertInput,
   type PerformanceSnapshotUpsertResult,
+  type SnapshotSeriesRow,
 } from "../index.js";
 import type { AiRunCreateInputData } from "@addroid/llm-provider";
 
@@ -48,7 +49,10 @@ class FakeSnapshotStore implements DailyReportSnapshotStore {
   aiRunCalls: AiRunCreateInputData[] = [];
   private nextSnapshotId = 1;
   private nextAiRunId = 1;
-  constructor(account: DailyReportAdAccountSnapshot | null) {
+  constructor(
+    account: DailyReportAdAccountSnapshot | null,
+    private readonly existingSeries: SnapshotSeriesRow[] = []
+  ) {
     this.account = account;
   }
   async findAdAccount(_input: { workspaceId: string; accountKey: string }) {
@@ -68,6 +72,40 @@ class FakeSnapshotStore implements DailyReportSnapshotStore {
   async createAiRun(data: AiRunCreateInputData) {
     this.aiRunCalls.push(data);
     return { id: `run-${this.nextAiRunId++}` };
+  }
+  async listSnapshotSeries(
+    input: Parameters<DailyReportSnapshotStore["listSnapshotSeries"]>[0]
+  ): Promise<SnapshotSeriesRow[]> {
+    const upserted: SnapshotSeriesRow[] = this.upsertCalls.map((row) => ({
+      hierarchy: row.nodeType,
+      nodeKey: row.nodeKey,
+      displayName:
+        row.raw &&
+        typeof row.raw === "object" &&
+        !Array.isArray(row.raw) &&
+        typeof (row.raw as Record<string, unknown>).displayName === "string"
+          ? ((row.raw as Record<string, unknown>).displayName as string)
+          : row.nodeKey,
+      metricDate: row.metricDate,
+      spendMicros: row.spendMicros,
+      impressions: row.impressions,
+      clicks: row.clicks,
+      conversions: row.conversions,
+      frequency: row.frequency ?? null,
+    }));
+    return [...this.existingSeries, ...upserted]
+      .filter(
+        (row) =>
+          input.nodeTypes.includes(row.hierarchy) &&
+          row.metricDate >= input.since &&
+          row.metricDate <= input.until
+      );
+  }
+}
+
+class FailingSnapshotStore extends FakeSnapshotStore {
+  override async listSnapshotSeries(): Promise<SnapshotSeriesRow[]> {
+    throw new Error("snapshot series unavailable");
   }
 }
 
@@ -453,6 +491,73 @@ test("runDailyReportOnce stores 4-level snapshots and emits AI commentary + top 
   assert.equal(summary.mode, "proposal");
   // insightsProvider was asked for prior period
   assert.equal(insights.calls[0]!.includePriorPeriod, true);
+});
+
+test("runDailyReportOnce sends deterministic anomalies to analyst input", async () => {
+  const existingSeries: SnapshotSeriesRow[] = [100, 110, 90, 105, 95, 100].map(
+    (spend, idx) => ({
+      hierarchy: "campaign",
+      nodeKey: "cmp_1",
+      displayName: "Campaign 1",
+      metricDate: `2026-04-${String(idx + 25).padStart(2, "0")}`,
+      spendMicros: BigInt(spend * 1_000_000),
+      impressions: 1000,
+      clicks: 50,
+      conversions: 10,
+      frequency: 1.5,
+    })
+  );
+  const current = [
+    makeRow("account", "act_111"),
+    makeRow("campaign", "cmp_1", {
+      displayName: "Campaign 1",
+      spendMicros: 180_000_000n,
+    }),
+  ];
+  const insights = new FakeInsightsProvider({ current, prior: [], source: "mock" });
+  const store = new FakeSnapshotStore(ACCOUNT, existingSeries);
+  const analyst = new FakeAnalystRunner(makeAnalystResult());
+  const summary = await runDailyReportOnce({
+    workspaceId: "ws-1",
+    mode: "report_only",
+    accountKey: "primary",
+    metricDate: "2026-05-01",
+    insightsProvider: insights,
+    store,
+    analyst,
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(summary.anomalies.quietDay, false);
+  assert.equal(summary.anomalies.findings[0]!.metric, "spend");
+  assert.equal(analyst.calls[0]!.quietDay, false);
+  assert.equal(analyst.calls[0]!.anomalyFindings?.[0]?.nodeKey, "cmp_1");
+  assert.equal(analyst.calls[0]!.anomalyFindings?.[0]?.severity, "high");
+});
+
+test("runDailyReportOnce falls back to legacy analyst input when anomaly detection fails", async () => {
+  const insights = new FakeInsightsProvider({
+    current: [makeRow("account", "act_111")],
+    prior: [makeRow("account", "act_111", { clicks: 45 })],
+    source: "mock",
+  });
+  const store = new FailingSnapshotStore(ACCOUNT);
+  const analyst = new FakeAnalystRunner(makeAnalystResult());
+  const summary = await runDailyReportOnce({
+    workspaceId: "ws-1",
+    mode: "report_only",
+    accountKey: "primary",
+    metricDate: "2026-05-02",
+    insightsProvider: insights,
+    store,
+    analyst,
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.match(summary.anomalyDetectionError ?? "", /snapshot series unavailable/);
+  assert.equal(summary.anomalies.quietDay, true);
+  assert.equal(analyst.calls[0]!.anomalyFindings, undefined);
+  assert.equal(analyst.calls[0]!.quietDay, undefined);
 });
 
 test("runDailyReportOnce surfaces analyst failures without losing snapshots", async () => {

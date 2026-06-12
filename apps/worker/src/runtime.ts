@@ -501,7 +501,9 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
                 summary.status === "succeeded" ||
                 summary.status === "no_account";
               const level: "info" | "warn" | "error" = ok
-                ? "info"
+                ? summary.anomalyDetectionError
+                  ? "warn"
+                  : "info"
                 : summary.status === "no_insights"
                   ? "warn"
                   : "error";
@@ -518,7 +520,10 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
                     ? ` — ${summary.aiCommentary.slice(0, 120)}`
                     : summary.errorMessage
                       ? ` — ${summary.errorMessage}`
-                      : ""),
+                      : "") +
+                  (summary.anomalyDetectionError
+                    ? ` — anomaly detection fallback: ${summary.anomalyDetectionError.slice(0, 120)}`
+                    : ""),
                 payload: dailyReportSummaryToPayload(summary),
               });
               if (summary.status === "ai_failed") {
@@ -1644,6 +1649,24 @@ function dailyReportSummaryToPayload(summary: DailyReportSummary): JsonValue {
     snapshotIds: summary.snapshotIds,
     aiRunId: summary.aiRunId,
     deltas: summary.deltas,
+    statisticalContext: summary.statisticalContext as unknown as JsonValue,
+    anomalies: {
+      evaluatedNodeCount: summary.anomalies.evaluatedNodeCount,
+      quietDay: summary.anomalies.quietDay,
+      findings: summary.anomalies.findings.map((finding) => ({
+        hierarchy: finding.hierarchy,
+        nodeKey: finding.nodeKey,
+        displayName: finding.displayName,
+        metric: finding.metric,
+        kind: finding.kind,
+        zScore: finding.zScore,
+        currentValue: finding.currentValue,
+        baselineValue: finding.baselineValue,
+        relativeChange: finding.relativeChange,
+        confidence: finding.confidence,
+        severity: finding.severity,
+      })),
+    },
     current: kpis(summary.current),
     prior: kpis(summary.prior),
     aiCommentary: summary.aiCommentary,
@@ -1655,6 +1678,9 @@ function dailyReportSummaryToPayload(summary: DailyReportSummary): JsonValue {
     })),
   };
   if (summary.errorMessage) payload.errorMessage = summary.errorMessage;
+  if (summary.anomalyDetectionError) {
+    payload.anomalyDetectionError = summary.anomalyDetectionError;
+  }
   return payload;
 }
 

@@ -63,12 +63,33 @@ interface DailyReportSummary {
   prior: KpiSet;
   deltas: Record<string, string>;
   statisticalContext: StatisticalContext;
+  anomalies: AnomalyDetectionSummary;
+  anomalyDetectionError?: string;
   snapshotIds: string[];
   aiCommentary: string | null;
   topImprovements: ImprovementCandidate[];
   aiRunId: string | null;
   errorMessage?: string;
   mode: string;
+}
+
+interface AnomalyFinding {
+  hierarchy: string;
+  nodeKey: string;
+  displayName: string;
+  metric: string;
+  kind: string;
+  currentValue: number;
+  baselineValue: number;
+  relativeChange: number | null;
+  confidence: string;
+  severity: string;
+}
+
+interface AnomalyDetectionSummary {
+  findings: AnomalyFinding[];
+  evaluatedNodeCount: number;
+  quietDay: boolean;
 }
 
 interface StatisticalComparison {
@@ -197,6 +218,7 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
         }))
     : [];
   const statisticalContext = parseStatisticalContext(output.statisticalContext);
+  const anomalies = parseAnomalies(output.anomalies);
   return {
     status: output.status,
     workspaceId: output.workspaceId,
@@ -211,6 +233,10 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
     prior: readKpi(output.prior),
     deltas,
     statisticalContext,
+    anomalies,
+    ...(typeof output.anomalyDetectionError === "string"
+      ? { anomalyDetectionError: output.anomalyDetectionError }
+      : {}),
     snapshotIds,
     aiCommentary:
       typeof output.aiCommentary === "string" ? output.aiCommentary : null,
@@ -220,6 +246,31 @@ function parseDailyReportSummary(output: unknown): DailyReportSummary | null {
       ? { errorMessage: output.errorMessage }
       : {}),
     mode: readString(output.mode, "report_only"),
+  };
+}
+
+function parseAnomalies(value: unknown): AnomalyDetectionSummary {
+  if (!isRecord(value)) {
+    return { findings: [], evaluatedNodeCount: 0, quietDay: true };
+  }
+  const findings = Array.isArray(value.findings)
+    ? value.findings.filter(isRecord).map((row) => ({
+        hierarchy: readString(row.hierarchy),
+        nodeKey: readString(row.nodeKey),
+        displayName: readString(row.displayName, readString(row.nodeKey)),
+        metric: readString(row.metric),
+        kind: readString(row.kind),
+        currentValue: readNumber(row.currentValue),
+        baselineValue: readNumber(row.baselineValue),
+        relativeChange: readNullableNumber(row.relativeChange),
+        confidence: readString(row.confidence, "insufficient"),
+        severity: readString(row.severity, "low"),
+      }))
+    : [];
+  return {
+    findings,
+    evaluatedNodeCount: readNumber(value.evaluatedNodeCount),
+    quietDay: value.quietDay === true || findings.length === 0,
   };
 }
 
@@ -540,6 +591,67 @@ function confidenceBadge(summary: DailyReportSummary) {
   return <StatusBadge state={state[confidence]}>{labels[confidence]}</StatusBadge>;
 }
 
+function anomalySeverityState(severity: string): StatusState {
+  switch (severity) {
+    case "high":
+      return "error";
+    case "medium":
+      return "warn";
+    case "low":
+      return "info";
+    default:
+      return "idle";
+  }
+}
+
+function anomalySeverityLabel(severity: string): string {
+  const labels: Record<string, string> = {
+    high: "高",
+    medium: "中",
+    low: "低",
+  };
+  return labels[severity] ?? severity;
+}
+
+function anomalyMetricLabel(metric: string): string {
+  const labels: Record<string, string> = {
+    spend: "Spend",
+    impressions: "Impressions",
+    conversions: "CV",
+    ctr: "CTR",
+    cvr: "CVR",
+    cpa: "CPA",
+    frequency: "Frequency",
+  };
+  return labels[metric] ?? metric;
+}
+
+function anomalyKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    spike: "増加",
+    drop: "低下",
+    trend: "傾向",
+  };
+  return labels[kind] ?? kind;
+}
+
+function formatAnomalyValue(finding: AnomalyFinding, value: number): string {
+  if (finding.metric === "ctr" || finding.metric === "cvr") {
+    return formatRate(value);
+  }
+  if (finding.metric === "frequency") {
+    return formatFrequency(value);
+  }
+  return formatNumber(value);
+}
+
+function formatRelativeChange(value: number | null): string {
+  if (value === null) return "—";
+  const pct = value * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
 function summaryItems(summary: DailyReportSummary, displayTimeZone: string): KeyValueEntry[] {
   return [
     {
@@ -642,6 +754,72 @@ function DailyReportDetail({
             {comparisonBadgeLabel(comparison)}
           </StatusBadge>
         ))}
+      </div>
+
+      <div>
+        <div
+          style={{
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "var(--color-text-secondary)",
+            marginBottom: "0.5rem",
+          }}
+        >
+          検知された変化
+        </div>
+        {summary.anomalyDetectionError ? (
+          <div style={{ color: "var(--color-status-warn)", fontSize: "0.8125rem" }}>
+            異常検知に失敗したため、従来のAIコメント方式にフォールバックしました。
+          </div>
+        ) : summary.anomalies.findings.length === 0 ? (
+          <div style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem" }}>
+            特筆すべき変化はありませんでした。
+          </div>
+        ) : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>重要度</th>
+                  <th>階層</th>
+                  <th>対象</th>
+                  <th>指標</th>
+                  <th>変化</th>
+                  <th>当日</th>
+                  <th>基準</th>
+                  <th>信頼度</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.anomalies.findings.map((finding, idx) => (
+                  <tr key={`${finding.hierarchy}:${finding.nodeKey}:${finding.metric}:${idx}`}>
+                    <td>
+                      <StatusBadge state={anomalySeverityState(finding.severity)}>
+                        {anomalySeverityLabel(finding.severity)}
+                      </StatusBadge>
+                    </td>
+                    <td>{hierarchyLabel(finding.hierarchy)}</td>
+                    <td>
+                      {finding.displayName}
+                      <div style={{ color: "var(--color-text-tertiary)", fontSize: "0.75rem" }}>
+                        {finding.nodeKey}
+                      </div>
+                    </td>
+                    <td>{anomalyMetricLabel(finding.metric)}</td>
+                    <td>
+                      {anomalyKindLabel(finding.kind)} {formatRelativeChange(finding.relativeChange)}
+                    </td>
+                    <td>{formatAnomalyValue(finding, finding.currentValue)}</td>
+                    <td>{formatAnomalyValue(finding, finding.baselineValue)}</td>
+                    <td>{finding.confidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {summary.aiCommentary ? (

@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — Analyst 二段階異常検知
+
+- `daily_report` の Analyst 入力を決定論的な異常検知 findings 中心に二段化し、`/reports/daily` に検知された変化テーブルを追加。
+
 ### Added — 配信面プレビュー
 
 - `/creatives/[id]` と `/approvals/[prNumber]` に Feed / Stories / Carousel のHTMLモックフレーム型クリエイティブプレビューを追加。

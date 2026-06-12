@@ -202,6 +202,18 @@ export {
 } from "./daily-report.js";
 
 export {
+  detectAnomalies,
+  type AnomalyDetectionResult,
+  type AnomalyDetectionStore,
+  type AnomalyHierarchy,
+  type AnomalyKind,
+  type AnomalyMetric,
+  type AnomalySeverity,
+  type NodeAnomalyFinding,
+  type SnapshotSeriesRow,
+} from "./anomaly-detection.js";
+
+export {
   deriveMetrics,
   microsToMajorUnit,
   type DerivedMetrics,
