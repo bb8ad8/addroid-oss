@@ -14,6 +14,10 @@
 
 import path from "node:path";
 import { LocalDiskStorage } from "@addroid/config";
+import {
+  parseCreativeGenes,
+  type CreativeGenes,
+} from "@addroid/llm-provider";
 import type { StatusState } from "../components/ui/StatusDot";
 import { formatDateTime } from "./datetime";
 import { sanitizeForDisplay } from "./meta-runtime";
@@ -148,6 +152,7 @@ export interface CreativeSpec {
   textVariants: CreativeSpecAdText[];
   metaTextRecommendations: CreativeSpecTextRecommendations | null;
   qa: CreativeSpecQa | null;
+  genes: CreativeGenes | null;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -224,6 +229,7 @@ export function parseCreativeSpec(spec: unknown): CreativeSpec {
     textVariants,
     metaTextRecommendations: recommendations,
     qa,
+    genes: parseCreativeGenes(r.genes),
   };
 }
 
@@ -329,6 +335,7 @@ export interface CreativeMetadataDocument {
   costUsd: number;
   assets: CreativeMetadataAsset[];
   qa: CreativeMetadataQa;
+  genes: CreativeGenes | null;
   links: CreativeMetadataLinks;
 }
 
@@ -448,6 +455,7 @@ export function parseCreativeMetadata(
       failingCount: readNum(qaRaw.failingCount) ?? 0,
       assets: qaAssets,
     },
+    genes: parseCreativeGenes(raw.genes),
     links: {
       aiRunId: readStr(linksRaw.aiRunId),
       imagePromptAiRunId: readStr(linksRaw.imagePromptAiRunId),

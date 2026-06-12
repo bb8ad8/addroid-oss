@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — クリエイティブ遺伝子タグ
+
+- Creative QA agent が閉じた語彙の CreativeGenes (訴求軸・トーン・被写体・配色・構図など) を推定し、`creatives.genes` と metadata.json に保存するように追加。
+- `/creatives` に訴求軸チップ表示と訴求軸フィルタを追加し、`/creatives/[id]` で CreativeGenes の全フィールドを確認できるように追加。
+
 ### Added — パフォーマンスメトリクス拡充
 
 - `performance_snapshots` に reach / frequency / link click / video view / ranking diagnostics を nullable 指標として追加。

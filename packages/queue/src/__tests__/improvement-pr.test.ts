@@ -36,6 +36,7 @@ import {
   MockImageProvider,
   StubImageProvider,
   type AiRunCreateInputData,
+  type CreativeGenes,
   type CreativeStorageAdapter,
 } from "@addroid/llm-provider";
 
@@ -127,6 +128,7 @@ interface PipelineOverrides {
   creativeQaRecommendation?: "approve" | "request_changes" | "reject";
   creativeQaIssues?: ImprovementPrCreativeQaOutput["issues"];
   creativeQaRationale?: string;
+  creativeQaGenes?: CreativeGenes;
   mediaBuyerDecision?: "propose" | "skip_no_proposal" | "skip_dangerous_only";
   mediaBuyerProposals?: ImprovementPrMediaBuyerOutput["proposals"];
   gitopsDecision?: "propose" | "skip";
@@ -242,9 +244,14 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
       aiRunInput: makeAiRunInput({
         agent: "creative_qa",
         decision: recommendation,
-        outputs: { recommendation, issues, rationale },
+        outputs: { recommendation, issues, rationale, genes: this.cfg.creativeQaGenes ?? null },
       }),
-      output: { issues, recommendation, rationale },
+      output: {
+        issues,
+        recommendation,
+        rationale,
+        ...(this.cfg.creativeQaGenes ? { genes: this.cfg.creativeQaGenes } : {}),
+      },
       error: null,
     };
   }
@@ -945,6 +952,17 @@ test("creatives: image_prompt prompts + rationale + creative_qa result are persi
       { severity: "info", category: "brand_tone", message: "lean studio fits brand voice" },
     ],
     creativeQaRationale: "all checks pass",
+    creativeQaGenes: {
+      schemaVersion: 1,
+      appealAxes: ["benefit", "feature"],
+      tone: "calm",
+      subjectType: "product",
+      colorScheme: "bright",
+      layout: "single_focus",
+      hasTextOverlay: false,
+      hasCta: true,
+      language: "ja",
+    },
   });
   const publisher = new FakePublisher();
   const audit = new FakeAuditWriter();
@@ -990,11 +1008,23 @@ test("creatives: image_prompt prompts + rationale + creative_qa result are persi
   assert.equal(c0.qa.rationale, "all checks pass");
   assert.equal(c0.qa.issues.length, 1);
   assert.equal(c0.qa.issues[0]!.category, "brand_tone");
+  assert.deepEqual(c0.genes, {
+    schemaVersion: 1,
+    appealAxes: ["benefit", "feature"],
+    tone: "calm",
+    subjectType: "product",
+    colorScheme: "bright",
+    layout: "single_focus",
+    hasTextOverlay: false,
+    hasCta: true,
+    language: "ja",
+  });
 
   const c1 = store.creativeCalls[1]!;
   assert.equal(c1.variantIndex, 1);
   assert.equal(c1.key, `image_${imagePromptAiRunId}_v1`);
   assert.equal(c1.prompt.prompt, "lifestyle outdoor");
+  assert.deepEqual(c1.genes, c0.genes);
   // Same QA ai_run is linked to every variant produced in the same hop.
   assert.equal(c1.qa.aiRunId, creativeQaAiRunId);
 

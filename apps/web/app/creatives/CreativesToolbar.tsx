@@ -9,6 +9,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
+import { APPEAL_AXES, GENE_LABELS_JA } from "@addroid/llm-provider/creative-genes";
 
 export interface AccountOption {
   id: string;
@@ -27,6 +28,7 @@ export interface CreativesToolbarProps {
   selectedAccountId: string | null;
   selectedStatus: string;
   selectedProvider: string;
+  selectedAppealAxis: string;
 }
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -50,6 +52,7 @@ export function CreativesToolbar({
   selectedAccountId,
   selectedStatus,
   selectedProvider,
+  selectedAppealAxis,
 }: CreativesToolbarProps) {
   const router = useRouter();
   const params = useSearchParams();
@@ -129,6 +132,27 @@ export function CreativesToolbar({
           {providers.map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="toolbar__field">
+        <label className="toolbar__label" htmlFor="creatives-appeal-axis">
+          訴求軸
+        </label>
+        <select
+          id="creatives-appeal-axis"
+          className="form-select"
+          value={selectedAppealAxis}
+          onChange={(ev) =>
+            navigate({ appealAxis: ev.target.value === "all" ? null : ev.target.value })
+          }
+        >
+          <option value="all">すべて</option>
+          {APPEAL_AXES.map((axis) => (
+            <option key={axis} value={axis}>
+              {GENE_LABELS_JA[axis] ?? axis}
             </option>
           ))}
         </select>

@@ -669,6 +669,103 @@ test("runCreativeQaAgent: succeeds with request_changes when issues present", as
   assert.equal(result.aiRunInput.decision, "request_changes");
 });
 
+test("runCreativeQaAgent: accepts valid genes", async () => {
+  const genes = {
+    schemaVersion: 1,
+    appealAxes: ["price", "urgency"],
+    tone: "casual",
+    subjectType: "product",
+    colorScheme: "bright",
+    layout: "single_focus",
+    hasTextOverlay: true,
+    hasCta: true,
+    language: "ja",
+  };
+  const provider = await connectedMockProvider({
+    responder: () =>
+      JSON.stringify({
+        issues: [],
+        recommendation: "approve",
+        rationale: "Ready.",
+        genes,
+        confidence: 0.8,
+      }),
+  });
+  const result = await runCreativeQaAgent(baseCtx(provider), {
+    copy: {
+      primary: { headline: "今だけ20%OFF", primaryText: "今日中にお試しください", cta: "詳しく見る" },
+      alternates: [],
+      rationale: "r",
+    },
+    imagePrompts: {
+      variants: [
+        {
+          prompt: "bright product hero with bold Japanese CTA overlay",
+          negativePrompt: "no logo",
+          styleNotes: "single product focus",
+        },
+      ],
+      rationale: "r",
+    },
+  });
+  assert.equal(result.error, null);
+  assert.deepEqual(result.output?.genes, genes);
+});
+
+test("runCreativeQaAgent: ignores invalid genes while QA succeeds", async () => {
+  const provider = await connectedMockProvider({
+    responder: () =>
+      JSON.stringify({
+        issues: [],
+        recommendation: "approve",
+        rationale: "Ready.",
+        genes: {
+          schemaVersion: 1,
+          appealAxes: ["price"],
+          tone: "friendly",
+          subjectType: "product",
+          colorScheme: "bright",
+          layout: "single_focus",
+          hasTextOverlay: true,
+          hasCta: true,
+          language: "ja",
+        },
+        confidence: 0.8,
+      }),
+  });
+  const result = await runCreativeQaAgent(baseCtx(provider), {
+    copy: {
+      primary: { headline: "h", primaryText: "p", cta: "c" },
+      alternates: [],
+      rationale: "r",
+    },
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.aiRunInput.status, "succeeded");
+  assert.equal(result.output?.genes, undefined);
+});
+
+test("runCreativeQaAgent: missing genes remains backward compatible", async () => {
+  const provider = await connectedMockProvider({
+    responder: () =>
+      JSON.stringify({
+        issues: [],
+        recommendation: "approve",
+        rationale: "Ready.",
+        confidence: 0.8,
+      }),
+  });
+  const result = await runCreativeQaAgent(baseCtx(provider), {
+    copy: {
+      primary: { headline: "h", primaryText: "p", cta: "c" },
+      alternates: [],
+      rationale: "r",
+    },
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.output?.genes, undefined);
+});
+
 test("buildCreativeQaAgentPrompt uses creative_qa system prompt", () => {
   const prompt = buildCreativeQaAgentPrompt({
     copy: { primary: { headline: "h", primaryText: "p", cta: "c" }, alternates: [], rationale: "r" },

@@ -502,6 +502,9 @@ model Creative {
   // 生成パラメータのスナップショット (variation_conditions / variant_count / purpose)。
   // creative-storage の metadata.json と同形。
   parameters        Json?
+  // creative_qa agent が付与する閉じた語彙の構造化タグ (CreativeGenes v1)。
+  // 既存行やタグ付け失敗時は null。
+  genes             Json?
   storagePath       String? // LocalDisk 内の相対パス (実体配置先 — 内部用)
   // 安定 storage ref `storage://creatives/<account_key>/<creative_id>/...`。
   // UI / PR / 監査ログ / proxy lookup はすべてこれを使う (絶対 fs path は晒さない)。

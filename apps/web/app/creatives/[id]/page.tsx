@@ -16,6 +16,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import {
+  GENE_LABELS_JA,
+  parseCreativeGenes,
+  type CreativeGenes,
+} from "@addroid/llm-provider";
 import { prisma } from "../../../lib/prisma";
 import { Panel } from "../../../components/ui/Panel";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -91,6 +96,7 @@ export default async function CreativeDetailPage({
         provider: true,
         model: true,
         parameters: true,
+        genes: true,
         storagePath: true,
         storageRef: true,
         externalId: true,
@@ -215,6 +221,7 @@ export default async function CreativeDetailPage({
   }
 
   const spec = parseCreativeSpec(row.spec);
+  const genes = parseCreativeGenes(row.genes) ?? spec.genes ?? metadata?.genes ?? null;
   const params2 = parseCreativeParameters(row.parameters);
   const statusState = creativeStatusToState(row.status);
   const overallQa = metadata?.qa.overall ?? null;
@@ -524,6 +531,25 @@ export default async function CreativeDetailPage({
           status={<StatusDot state={statusState}>{row.status}</StatusDot>}
         >
           <KeyValueList items={overviewItems} />
+        </Panel>
+
+        <Panel
+          title="Creative genes"
+          subtitle="creative_qa が付与した構造化タグ"
+          status={
+            <StatusDot state={genes ? "ok" : "idle"}>
+              {genes ? "tagged" : "タグなし"}
+            </StatusDot>
+          }
+        >
+          {genes ? (
+            <KeyValueList items={creativeGeneItems(genes)} />
+          ) : (
+            <EmptyState
+              title="タグなし"
+              description="既存クリエイティブ、または creative_qa のタグ推定が無効だったクリエイティブです。"
+            />
+          )}
         </Panel>
 
         <Panel
@@ -1286,6 +1312,36 @@ function QaAssetBlock({ asset }: { asset: CreativeMetadataQaAsset }) {
       </div>
     </details>
   );
+}
+
+function creativeGeneItems(genes: CreativeGenes): KeyValueEntry[] {
+  return [
+    {
+      label: "訴求軸",
+      value: (
+        <div className="creative-card__genes">
+          {genes.appealAxes.map((axis) => (
+            <span className="creative-gene-chip" key={axis}>
+              {GENE_LABELS_JA[axis] ?? axis}
+            </span>
+          ))}
+        </div>
+      ),
+    },
+    { label: "トーン", value: <span>{GENE_LABELS_JA[genes.tone] ?? genes.tone}</span> },
+    {
+      label: "被写体",
+      value: <span>{GENE_LABELS_JA[genes.subjectType] ?? genes.subjectType}</span>,
+    },
+    {
+      label: "配色",
+      value: <span>{GENE_LABELS_JA[genes.colorScheme] ?? genes.colorScheme}</span>,
+    },
+    { label: "構図", value: <span>{GENE_LABELS_JA[genes.layout] ?? genes.layout}</span> },
+    { label: "文字入り", value: <span>{genes.hasTextOverlay ? "あり" : "なし"}</span> },
+    { label: "CTA", value: <span>{genes.hasCta ? "あり" : "なし"}</span> },
+    { label: "言語", value: <span>{GENE_LABELS_JA[genes.language] ?? genes.language}</span> },
+  ];
 }
 
 function QaCheckRow({ check }: { check: CreativeMetadataQaCheck }) {

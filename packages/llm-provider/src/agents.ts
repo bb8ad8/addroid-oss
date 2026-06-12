@@ -40,6 +40,11 @@ import type {
   LLMMessage,
   LLMProvider,
 } from "./types.js";
+import {
+  parseCreativeGenes,
+  renderGenesVocabularyForPrompt,
+  type CreativeGenes,
+} from "./creative-genes.js";
 
 // ---- 共有 helper -----------------------------------------------------------
 
@@ -950,6 +955,7 @@ export interface CreativeQaAgentOutput {
   issues: CreativeQaIssue[];
   recommendation: "approve" | "request_changes" | "reject";
   rationale: string;
+  genes?: CreativeGenes;
 }
 
 export type CreativeQaAgentDecision = "approve" | "request_changes" | "reject";
@@ -958,14 +964,18 @@ export const CREATIVE_QA_AGENT_SYSTEM_PROMPT = [
   "You are the AdDroid OSS creative_qa agent.",
   "Audit copy + image prompts against brand and Meta ad policies.",
   "You do not modify the creative — only assess and recommend.",
+  "Infer CreativeGenes from the copy and imagePrompts, using only the closed vocabulary below.",
+  renderGenesVocabularyForPrompt(),
   "",
   "Respond with a single JSON object using exactly these fields:",
   "  issues:         { severity: 'info' | 'warn' | 'error', category: string, message: string }[]",
   "  recommendation: 'approve' | 'request_changes' | 'reject'",
   "  rationale:      string (1-2 sentences)",
+  "  genes:          CreativeGenes object inferred from copy + imagePrompts",
   "  confidence:     number in [0, 1]",
   "",
   "If any issue has severity='error', recommendation must NOT be 'approve'.",
+  "If unsure, still choose the closest valid CreativeGenes values; never invent vocabulary values.",
   "Do not include markdown, prose, or commentary outside the JSON object.",
 ].join("\n");
 
@@ -1017,11 +1027,13 @@ function parseCreativeQaAgentResponse(raw: string): {
       "creative_qa recommendation='approve' is invalid when any issue.severity='error'"
     );
   }
+  const genes = parseCreativeGenes(obj.genes);
   return {
     output: {
       issues,
       recommendation,
       rationale: requireString(obj, "rationale"),
+      ...(genes ? { genes } : {}),
     },
     decision: recommendation,
     confidence: clampConfidence(obj.confidence),

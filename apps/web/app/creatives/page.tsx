@@ -23,6 +23,12 @@
 
 import Link from "next/link";
 import type { Prisma } from "@addroid/db";
+import {
+  APPEAL_AXES,
+  GENE_LABELS_JA,
+  parseCreativeGenes,
+  type AppealAxis,
+} from "@addroid/llm-provider";
 import { prisma } from "../../lib/prisma";
 import { Panel } from "../../components/ui/Panel";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -54,6 +60,7 @@ interface SearchParamsInput {
   accountId?: string | string[];
   status?: string | string[];
   provider?: string | string[];
+  appealAxis?: string | string[];
 }
 
 interface CreativeRow {
@@ -66,6 +73,7 @@ interface CreativeRow {
   model: string | null;
   storageRef: string | null;
   storagePath: string | null;
+  genes: unknown;
   pullRequestId: string | null;
   aiRunId: string | null;
   creativeQaAiRunId: string | null;
@@ -93,6 +101,12 @@ export default async function CreativesPage({
   const accountIdParam = firstSearchParam(resolvedSearchParams?.accountId) ?? null;
   const statusParam = (firstSearchParam(resolvedSearchParams?.status) ?? "all").trim();
   const providerParam = (firstSearchParam(resolvedSearchParams?.provider) ?? "all").trim();
+  const appealAxisParam = (firstSearchParam(resolvedSearchParams?.appealAxis) ?? "all").trim();
+  const selectedAppealAxis: AppealAxis | "all" = APPEAL_AXES.includes(
+    appealAxisParam as AppealAxis
+  )
+    ? (appealAxisParam as AppealAxis)
+    : "all";
 
   let dbReady = true;
   let accounts: AccountOption[] = [];
@@ -131,6 +145,12 @@ export default async function CreativesPage({
       where.storageRef = { not: null };
       where.storagePath = { not: null };
     }
+    if (selectedAppealAxis !== "all") {
+      where.genes = {
+        path: ["appealAxes"],
+        array_contains: [selectedAppealAxis],
+      };
+    }
 
     creatives = await prisma.creative.findMany({
       where,
@@ -146,6 +166,7 @@ export default async function CreativesPage({
         model: true,
         storageRef: true,
         storagePath: true,
+        genes: true,
         pullRequestId: true,
         aiRunId: true,
         creativeQaAiRunId: true,
@@ -251,6 +272,7 @@ export default async function CreativesPage({
           selectedAccountId={accountIdParam}
           selectedStatus={statusParam}
           selectedProvider={providerParam}
+          selectedAppealAxis={selectedAppealAxis}
         />
 
         <Panel
@@ -324,6 +346,7 @@ function CreativeCard({
   const showImage = hasStorageRef && thumb.assetId !== null;
   const showStorageMissing = hasStorageRef && !thumb.storageReachable;
   const spec = parseCreativeSpec(row.spec);
+  const genes = parseCreativeGenes(row.genes) ?? spec.genes;
   const adText = spec.adText;
   const accountName = row.account?.displayName || row.account?.key || "AdDroid";
   const headline = adText?.headline || row.displayName;
@@ -405,6 +428,17 @@ function CreativeCard({
         <div className="creative-card__meta">
           <div className="creative-card__row">
             <StatusBadge state={statusState}>{row.status}</StatusBadge>
+          </div>
+          <div className="creative-card__genes" aria-label="訴求軸">
+            {genes ? (
+              genes.appealAxes.map((axis) => (
+                <span className="creative-gene-chip" key={axis}>
+                  {GENE_LABELS_JA[axis] ?? axis}
+                </span>
+              ))
+            ) : (
+              <span className="creative-card__optional">タグなし</span>
+            )}
           </div>
           <div className="creative-card__title" title={row.displayName}>
             {row.displayName}

@@ -38,6 +38,7 @@ import {
   imagePromptVariantsToVariationConditions,
   persistCreativeAssets,
   type AiRunCreateInputData,
+  type CreativeGenes,
   type CreativeQaPolicy,
   type CreativeStorageAdapter,
   type ImageProvider,
@@ -164,6 +165,8 @@ export interface ImprovementPrCreativeAttachment {
   storagePath?: string | null;
   /** 生成パラメータのスナップショット (variation_conditions 等)。同上。 */
   parameters?: Record<string, unknown> | null;
+  /** creative_qa agent が推定した閉じた語彙の構造化タグ。 */
+  genes?: CreativeGenes | null;
 }
 
 // ---------------------------------------------------------------------
@@ -309,6 +312,8 @@ export interface ImprovementPrCreativeRecord {
   model?: string | null;
   /** 生成パラメータのスナップショット (variation_conditions / variant_count / purpose 等)。 */
   parameters?: Record<string, unknown> | null;
+  /** creative_qa agent が推定した閉じた語彙の構造化タグ。 */
+  genes?: CreativeGenes | null;
 }
 
 /**
@@ -574,6 +579,7 @@ export interface ImprovementPrCreativeQaOutput {
   issues: ImprovementPrCreativeQaIssue[];
   recommendation: ImprovementPrCreativeQaRecommendation;
   rationale: string;
+  genes?: CreativeGenes;
 }
 
 /**
@@ -1103,6 +1109,7 @@ async function runPipelineMode(
     qaPolicy: opts.creativeQaPolicy ?? DEFAULT_CREATIVE_QA_POLICY,
     imagePromptAiRunId: imageRow.id,
     creativeQaAiRunId: qaRow.id,
+    genes: creativeQa.output.genes ?? null,
     skipBinary: creativeQa.output.recommendation === "reject",
   });
 
@@ -1160,6 +1167,7 @@ async function runPipelineMode(
         issues: creativeQa.output.issues,
         rationale: creativeQa.output.rationale,
       },
+      genes: creativeQa.output.genes ?? null,
       status: creativeStatus,
       storageRef: variantOutcome?.storagePath
         ? imageGen.baseStorageRef
@@ -1187,6 +1195,7 @@ async function runPipelineMode(
         issues: creativeQa.output.issues,
         rationale: creativeQa.output.rationale,
       },
+      genes: creativeQa.output.genes ?? null,
       imagePromptAiRunId: imageRow.id,
       storageRef: variantOutcome?.storageRef ?? null,
       storagePath: variantOutcome?.storagePath ?? null,
@@ -2468,6 +2477,7 @@ interface RunImageGenerationHopInput {
   qaPolicy: CreativeQaPolicy;
   imagePromptAiRunId: string;
   creativeQaAiRunId: string;
+  genes: CreativeGenes | null;
   /** creative_qa が reject した時に Provider 呼び出し自体を skip する。 */
   skipBinary: boolean;
 }
@@ -2624,6 +2634,7 @@ async function runImageGenerationHop(
         imagePromptAiRunId: input.imagePromptAiRunId,
         creativeQaAiRunId: input.creativeQaAiRunId,
       },
+      genes: input.genes,
     });
   } catch {
     // Storage 失敗は workflow を腐らせず prompt-only fallback に倒す。

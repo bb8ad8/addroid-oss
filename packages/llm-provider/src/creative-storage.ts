@@ -51,6 +51,7 @@ import {
   type CreativeQaCheckResult,
   type CreativeQaOverallOutcome,
 } from "./creative-qa.js";
+import type { CreativeGenes } from "./creative-genes.js";
 
 // ---------------------------------------------------------------------------
 // Adapter shape
@@ -166,6 +167,8 @@ export interface PersistCreativeAssetsOptions {
   qa?: CreativeQaBatchResult | null;
   /** Web UI / audit からの deep-link 用 linkage。 */
   links?: PersistCreativeAssetsLinks;
+  /** creative_qa agent が推定した閉じた語彙の構造化タグ。 */
+  genes?: CreativeGenes | null;
   /**
    * metadata.json の `createdAt` フィールド。指定がなければ ISO 現在時刻。
    * test seam として注入できるように分離。
@@ -379,6 +382,7 @@ export async function persistCreativeAssets(
     qa: opts.qa,
     persistedAssets,
     links: opts.links ?? {},
+    genes: opts.genes ?? null,
     createdAt: opts.metadataCreatedAt ?? new Date().toISOString(),
   });
   const metadataJson = JSON.stringify(metadataDoc, null, 2) + "\n";
@@ -414,6 +418,7 @@ interface MetadataDocumentInput {
   qa: CreativeQaBatchResult;
   persistedAssets: PersistedCreativeAsset[];
   links: PersistCreativeAssetsLinks;
+  genes: CreativeGenes | null;
   createdAt: string;
 }
 
@@ -477,6 +482,7 @@ interface MetadataDocument {
    * `qa` は常に確定的な document を持つ (`null` は返らない)。
    */
   qa: MetadataQa;
+  genes: CreativeGenes | null;
   links: {
     aiRunId: string | null;
     imagePromptAiRunId: string | null;
@@ -534,6 +540,7 @@ function buildMetadataDocument(input: MetadataDocumentInput): MetadataDocument {
       qaOverall: a.qaOverall,
     })),
     qa,
+    genes: input.genes,
     links: {
       aiRunId: input.links.aiRunId ?? null,
       imagePromptAiRunId: input.links.imagePromptAiRunId ?? null,

@@ -150,6 +150,26 @@ export {
 } from "./image-factory.js";
 
 export {
+  APPEAL_AXES,
+  COLOR_SCHEMES,
+  GENE_LABELS_JA,
+  LANGUAGES,
+  LAYOUTS,
+  SUBJECT_TYPES,
+  TONES,
+  describeGenesForPrompt,
+  parseCreativeGenes,
+  renderGenesVocabularyForPrompt,
+  type AppealAxis,
+  type CreativeColorScheme,
+  type CreativeGenes,
+  type CreativeLanguage,
+  type CreativeLayout,
+  type CreativeSubjectType,
+  type CreativeTone,
+} from "./creative-genes.js";
+
+export {
   CreativeStorageInvalidIdError,
   CreativeStorageQaIncompleteError,
   persistCreativeAssets,

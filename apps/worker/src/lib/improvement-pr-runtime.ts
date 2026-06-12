@@ -180,6 +180,7 @@ export function createPrismaImprovementPrStore(
           })),
           rationale: data.qa.rationale,
         },
+        genes: data.genes ?? null,
       };
       const created = await prisma.creative.create({
         data: {
@@ -211,6 +212,10 @@ export function createPrismaImprovementPrStore(
           parameters:
             data.parameters !== undefined && data.parameters !== null
               ? (data.parameters as unknown as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
+          genes:
+            data.genes !== undefined && data.genes !== null
+              ? (data.genes as unknown as Prisma.InputJsonValue)
               : Prisma.JsonNull,
         },
         select: { id: true },

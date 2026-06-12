@@ -19,6 +19,7 @@ import {
   MockImageProvider,
   evaluateCreativeQaBatch,
   persistCreativeAssets,
+  type CreativeGenes,
   type CreativeStorageAdapter,
   type ImageGenerateResult,
   type ImageGeneratedAsset,
@@ -192,7 +193,7 @@ test("persistCreativeAssets writes assets under creatives/<account_key>/<creativ
 // Metadata content
 // ---------------------------------------------------------------------------
 
-test("persistCreativeAssets writes metadata.json that preserves prompt, provider, model, parameters, qa, and linkage", async () => {
+test("persistCreativeAssets writes metadata.json that preserves prompt, provider, model, parameters, qa, genes, and linkage", async () => {
   const { store, cleanup } = await makeDiskStorage();
   try {
     const generation = await fixtureGeneration();
@@ -200,12 +201,24 @@ test("persistCreativeAssets writes metadata.json that preserves prompt, provider
     // `passingQaForFixture` に集約済み。本テストは metadata.json が QA 結果を
     // 保持することを検証する目的なので、共通 helper を使って意図を統一する。
     const qa = passingQaForFixture(generation);
+    const genes = {
+      schemaVersion: 1,
+      appealAxes: ["benefit", "feature"],
+      tone: "calm",
+      subjectType: "product",
+      colorScheme: "brand_palette",
+      layout: "single_focus",
+      hasTextOverlay: false,
+      hasCta: true,
+      language: "ja",
+    } satisfies CreativeGenes;
     const result = await persistCreativeAssets({
       storage: store,
       accountKey: "acme",
       creativeId: "creative_meta_001",
       generation,
       qa,
+      genes,
       links: {
         aiRunId: "airun_image_001",
         imagePromptAiRunId: "airun_image_001",
@@ -266,6 +279,7 @@ test("persistCreativeAssets writes metadata.json that preserves prompt, provider
       "format",
       "quality",
     ]);
+    assert.deepEqual(parsed.genes, genes);
 
     const links = parsed.links as Record<string, unknown>;
     assert.equal(links.aiRunId, "airun_image_001");
