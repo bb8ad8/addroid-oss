@@ -170,6 +170,15 @@ export {
 } from "./creative-genes.js";
 
 export {
+  DEFAULT_PLACEMENT_SET,
+  PLACEMENT_PRESETS,
+  buildPlacementExpansionPlan,
+  placementPresetByKey,
+  type PlacementExpansionPlan,
+  type PlacementKey,
+} from "./placements.js";
+
+export {
   CreativeStorageInvalidIdError,
   CreativeStorageQaIncompleteError,
   persistCreativeAssets,

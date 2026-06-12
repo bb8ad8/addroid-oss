@@ -45,6 +45,7 @@ import {
   renderGenesVocabularyForPrompt,
   type CreativeGenes,
 } from "./creative-genes.js";
+import type { PlacementKey } from "./placements.js";
 
 // ---- 共有 helper -----------------------------------------------------------
 
@@ -629,6 +630,13 @@ export interface ImagePromptAgentInput {
     height: number;
     format?: "png" | "jpeg";
   }>;
+
+  /**
+   * 後段の決定論的 placement 展開で生成する配信面セット。
+   * 指定時、agent は各 placement ごとの variant を返さず、placement 横断で
+   * 破綻しない構図の「案」だけを返す。
+   */
+  placementSet?: PlacementKey[];
 }
 
 /**
@@ -699,6 +707,7 @@ export const IMAGE_PROMPT_AGENT_SYSTEM_PROMPT = [
   "  creativeStrategy      'scale_winner' | 'adapt_winner_to_underperformer' | 'refresh_underperformer'",
   "  variantCount          number (1-6, default 3)",
   "  dimensionPresets      { key, width, height, format? }[]",
+  "  placementSet          PlacementKey[]; when present, deterministic code expands every returned variant to all placements",
   "",
   "Use performance.recentKpis and improvementContext to motivate the creative direction (e.g. low CTR ⇒ stronger first-frame contrast).",
   "When performance.placementSignals or improvementContext.notes mention high-performing placements, weak placements, or missing surfaces, choose variantKey/dimensions to fit that placement need. For example feed_square=1:1, feed_portrait=4:5, story_reels=9:16, feed_landscape=1.91:1.",
@@ -709,7 +718,10 @@ export const IMAGE_PROMPT_AGENT_SYSTEM_PROMPT = [
   "Prefer referenceCreatives as positive seeds when present: preserve the winning message structure and visual logic, then adapt it to targetContext.",
   "Do not invent unrelated industries, products, locations, or accounts. If brandProfile/target/reference context is sparse, keep the prompt product-neutral and account-specific rather than adding arbitrary subject matter.",
   "Honor brandProfile.tone / palette / typography. Treat brandProfile.forbiddenTerms and policyConstraints as hard constraints.",
-  "If dimensionPresets is supplied, every variant MUST set variantKey to one of the provided keys.",
+  "If placementSet is supplied, return concept-level variants only. Do not create one variant per placement; deterministic code appends placement keys later.",
+  "When placementSet is supplied, include styleNotes that keep important subjects, text, and CTA-safe space inside the central 60% so the same concept can survive 1:1, 4:5, 9:16, and 1.91:1 crops.",
+  "If placementSet is omitted and dimensionPresets is supplied, every variant MUST set variantKey to one of the provided keys.",
+  "If placementSet is supplied, variantKey may be a base concept key such as 'variant-0' or 'benefit-hero'.",
   "If dimensionPresets is omitted, you MAY omit width/height/format/variantKey — defaults are derived from aspectRatio.",
   "",
   "Respond with a single JSON object using exactly these fields:",

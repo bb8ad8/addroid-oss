@@ -659,6 +659,7 @@ export function createImprovementPrPipelineRunner(
               }
           : {}),
         variantCount: 3,
+        ...(input.placementSet ? { placementSet: input.placementSet } : {}),
         dimensionPresets: IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS,
         policyConstraints: [
           ...(creativeContext?.brandProfile?.forbiddenTerms ?? []).map(

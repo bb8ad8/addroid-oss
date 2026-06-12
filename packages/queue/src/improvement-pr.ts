@@ -34,9 +34,11 @@
 
 import {
   DEFAULT_CREATIVE_QA_POLICY,
+  buildPlacementExpansionPlan,
   generateAndQaCreative,
   imagePromptVariantsToVariationConditions,
   persistCreativeAssets,
+  placementPresetByKey,
   type AiRunCreateInputData,
   type CreativeGenes,
   type CreativeQaPolicy,
@@ -47,6 +49,7 @@ import {
   type ImageVariationCondition,
   type PersistCreativeAssetsResult,
   type PersistedCreativeAsset,
+  type PlacementKey,
 } from "@addroid/llm-provider";
 import type { DailyReportAdAccountSnapshot } from "./daily-report.js";
 import {
@@ -232,6 +235,10 @@ export interface ImprovementPrCreativePromptVariant {
   prompt: string;
   negativePrompt: string;
   styleNotes: string;
+  variantKey?: string;
+  baseVariantKey?: string;
+  placementKey?: PlacementKey;
+  placementLabel?: string;
 }
 
 /**
@@ -671,6 +678,7 @@ export interface ImprovementPrPipelineRunner {
     analysisWindow: ImprovementPrAnalysisWindow;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
     performanceDigest?: CreativePerformanceDigest | null;
+    placementSet?: PlacementKey[];
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrImagePromptOutput>>;
   runCreativeQa(input: {
     copy: ImprovementPrCopyOutput;
@@ -900,6 +908,11 @@ export interface RunImprovementPrOptions {
    * 呼び出し側で `DEFAULT_CREATIVE_QA_POLICY` 上に merge してここに渡す想定。
    */
   creativeQaPolicy?: CreativeQaPolicy;
+  /**
+   * 指定時、image_prompt の各案を後段で placement 別アスペクト比に展開する。
+   * 未指定なら従来どおり ImagePromptVariant 1 件 = 生成 asset 1 件。
+   */
+  placementSet?: PlacementKey[];
   /** test seam: 現在時刻。 */
   now?: () => Date;
 }
@@ -1054,6 +1067,7 @@ async function runPipelineMode(
     analysisWindow,
     creativeContext,
     ...(creativePerformanceDigest ? { performanceDigest: creativePerformanceDigest } : {}),
+    ...(opts.placementSet ? { placementSet: opts.placementSet } : {}),
   });
   const imageRow = await opts.store.createAiRun(imagePrompt.aiRunInput);
   aiRunIds.push(imageRow.id);
@@ -1121,6 +1135,7 @@ async function runPipelineMode(
     accountKey: account.key,
     variants: imagePrompt.output.variants,
     dimensionPresets: IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS,
+    placementSet: opts.placementSet,
     rationale: imagePrompt.output.rationale,
     // regression fix: production が policy を明示しないケースでも、空 policy
     // で全 check が `skipped` に倒れて素通りすることを禁止する。
@@ -1133,14 +1148,20 @@ async function runPipelineMode(
     skipBinary: creativeQa.output.recommendation === "reject",
   });
 
-  for (let i = 0; i < imagePrompt.output.variants.length; i++) {
-    const variant = imagePrompt.output.variants[i]!;
+  for (let i = 0; i < imageGen.variants.length; i++) {
+    const variant = imageGen.variants[i]!;
     const creativeKey = `image_${imageRow.id}_v${i}`;
-    const displayName = `Image variant ${i + 1}`;
+    const displayName = variant.placementLabel
+      ? `Image variant ${variant.sourceVariantIndex + 1} / ${variant.placementLabel}`
+      : `Image variant ${i + 1}`;
     const promptVariant: ImprovementPrCreativePromptVariant = {
       prompt: variant.prompt,
       negativePrompt: variant.negativePrompt,
       styleNotes: variant.styleNotes,
+      variantKey: variant.variantKey,
+      baseVariantKey: variant.baseVariantKey,
+      ...(variant.placementKey ? { placementKey: variant.placementKey } : {}),
+      ...(variant.placementLabel ? { placementLabel: variant.placementLabel } : {}),
     };
     // image-Provider hop が成功したケースでは、決定論的 QA の per-asset overall
     // を creative.status に反映させる (qa_passed / qa_warned / qa_failed)。
@@ -1180,7 +1201,7 @@ async function runPipelineMode(
       variantIndex: i,
       prompt: promptVariant,
       rationale: imagePrompt.output.rationale,
-      adText: creativeAdTextForVariant(copy.output, i),
+      adText: creativeAdTextForVariant(copy.output, variant.sourceVariantIndex),
       qa: {
         aiRunId: qaRow.id,
         recommendation: creativeQa.output.recommendation,
@@ -2527,6 +2548,7 @@ interface RunImageGenerationHopInput {
   accountKey: string;
   variants: ImprovementPrImagePromptVariant[];
   dimensionPresets?: ImprovementPrImageDimensionPreset[];
+  placementSet?: PlacementKey[];
   rationale: string;
   qaPolicy: CreativeQaPolicy;
   imagePromptAiRunId: string;
@@ -2541,6 +2563,14 @@ interface PerVariantOutcome {
   status: ImprovementPrCreativeStatus | null;
   storageRef: string | null;
   storagePath: string | null;
+}
+
+interface PreparedImagePromptVariant extends ImprovementPrImagePromptVariant {
+  variantKey: string;
+  sourceVariantIndex: number;
+  baseVariantKey: string;
+  placementKey?: PlacementKey;
+  placementLabel?: string;
 }
 
 interface RunImageGenerationHopResult {
@@ -2563,8 +2593,12 @@ interface RunImageGenerationHopResult {
   baseStorageRef: string | null;
   /** image_prompt の variant 順に並ぶ per-variant 永続化結果。 */
   perVariant: PerVariantOutcome[];
+  /** 実際に creative 行・PR 添付へ展開する variant 列。 */
+  variants: PreparedImagePromptVariant[];
   /** Provider 失敗時の sanitized メッセージ (audit 用)。成功 / 未注入時は null。 */
   providerError: string | null;
+  /** placement 展開の監査用メタデータ。未指定時は null。 */
+  placementExpansion: Record<string, unknown> | null;
 }
 
 /**
@@ -2582,18 +2616,25 @@ interface RunImageGenerationHopResult {
 async function runImageGenerationHop(
   input: RunImageGenerationHopInput
 ): Promise<RunImageGenerationHopResult> {
-  const baseEmpty: PerVariantOutcome[] = input.variants.map((_, i) => ({
-    variantKey: `variant-${i}`,
-    status: null,
-    storageRef: null,
-    storagePath: null,
-  }));
+  let prepared = prepareImagePromptVariantsForGeneration({
+    variants: input.variants,
+    placementSet: input.placementSet,
+  });
+  let variationConditions: ImageVariationCondition[];
+  let placementExpansion = buildPlacementExpansionMetadata(prepared, input.placementSet);
+  const baseEmpty = () =>
+    prepared.variants.map((variant) => ({
+      variantKey: variant.variantKey,
+      status: null,
+      storageRef: null,
+      storagePath: null,
+    }));
   if (
     !input.imageProvider ||
     input.imageProvider.enabled === false ||
     !input.creativeStorage ||
     input.skipBinary ||
-    input.variants.length === 0
+    prepared.variants.length === 0
   ) {
     return {
       fallback: true,
@@ -2601,25 +2642,41 @@ async function runImageGenerationHop(
       model: null,
       parameters: null,
       baseStorageRef: null,
-      perVariant: baseEmpty,
+      perVariant: baseEmpty(),
+      variants: prepared.variants,
       providerError: null,
+      placementExpansion,
     };
   }
 
-  let variationConditions: ImageVariationCondition[];
   try {
-    const variantsForGeneration = input.variants.map((v, i) => ({
-      ...v,
-      variantKey: v.variantKey ?? `variant-${i}`,
-    }));
-    variationConditions = imagePromptVariantsToVariationConditions(
-      variantsForGeneration,
-      {
+    if (input.placementSet && input.placementSet.length > 0) {
+      variationConditions = prepared.variants.map((variant) => ({
+        width: variant.width ?? 1080,
+        height: variant.height ?? 1080,
+        format: variant.format ?? "png",
+        ...(variant.styleNotes ? { styleNotes: variant.styleNotes } : {}),
+        ...(variant.negativePrompt ? { negativePrompt: variant.negativePrompt } : {}),
+        variantKey: variant.variantKey,
+      }));
+    } else {
+      variationConditions = imagePromptVariantsToVariationConditions(prepared.variants, {
         aspectRatio: "1:1",
         dimensionPresets: input.dimensionPresets,
         defaultFormat: "png",
-      }
-    );
+      });
+      prepared = {
+        ...prepared,
+        variants: prepared.variants.map((variant, i) => ({
+          ...variant,
+          variantKey: variationConditions[i]?.variantKey ?? variant.variantKey,
+          width: variationConditions[i]?.width ?? variant.width,
+          height: variationConditions[i]?.height ?? variant.height,
+          format: variationConditions[i]?.format ?? variant.format,
+        })),
+      };
+      placementExpansion = buildPlacementExpansionMetadata(prepared, input.placementSet);
+    }
   } catch {
     return {
       fallback: true,
@@ -2627,11 +2684,13 @@ async function runImageGenerationHop(
       model: null,
       parameters: null,
       baseStorageRef: null,
-      perVariant: baseEmpty,
+      perVariant: baseEmpty(),
+      variants: prepared.variants,
       providerError: "image prompt variation conditions were invalid",
+      placementExpansion,
     };
   }
-  const promptVariants: ImagePromptVariant[] = input.variants.map((v, i) => {
+  const promptVariants: ImagePromptVariant[] = prepared.variants.map((v, i) => {
     const condition = variationConditions[i]!;
     return {
       variantKey: condition.variantKey,
@@ -2665,8 +2724,10 @@ async function runImageGenerationHop(
       model: null,
       parameters: null,
       baseStorageRef: null,
-      perVariant: baseEmpty,
+      perVariant: baseEmpty(),
+      variants: prepared.variants,
       providerError: result.providerError,
+      placementExpansion,
     };
   }
 
@@ -2698,8 +2759,10 @@ async function runImageGenerationHop(
       model: null,
       parameters: null,
       baseStorageRef: null,
-      perVariant: baseEmpty,
+      perVariant: baseEmpty(),
+      variants: prepared.variants,
       providerError: "creative storage write failed",
+      placementExpansion,
     };
   }
 
@@ -2707,7 +2770,7 @@ async function runImageGenerationHop(
   const assetByKey = new Map<string, PersistedCreativeAsset>();
   for (const a of persisted.assets) assetByKey.set(a.variantKey, a);
 
-  const perVariant: PerVariantOutcome[] = input.variants.map((_, i) => {
+  const perVariant: PerVariantOutcome[] = prepared.variants.map((_, i) => {
     const variantKey = variationConditions[i]?.variantKey ?? `variant-${i}`;
     const asset = assetByKey.get(variantKey) ?? null;
     let status: ImprovementPrCreativeStatus | null = null;
@@ -2741,9 +2804,101 @@ async function runImageGenerationHop(
       variationConditions: result.generation.meta.parameters.variationConditions,
       purpose: result.generation.meta.parameters.purpose,
       variantCount: result.generation.meta.parameters.variantCount,
+      ...(placementExpansion ? { placementExpansion } : {}),
     },
     baseStorageRef: persisted.baseStorageRef,
     perVariant,
+    variants: prepared.variants,
     providerError: null,
+    placementExpansion,
   };
+}
+
+const MAX_PLACEMENT_EXPANDED_VARIANTS = 12;
+
+function prepareImagePromptVariantsForGeneration(input: {
+  variants: ImprovementPrImagePromptVariant[];
+  placementSet?: PlacementKey[];
+}): {
+  variants: PreparedImagePromptVariant[];
+  originalVariantCount: number;
+  usedVariantCount: number;
+  maxExpandedVariants: number;
+  reduced: boolean;
+} {
+  if (!input.placementSet || input.placementSet.length === 0) {
+    return {
+      variants: input.variants.map((variant, i) => {
+        const variantKey = variant.variantKey ?? `variant-${i}`;
+        return {
+          ...variant,
+          variantKey,
+          sourceVariantIndex: i,
+          baseVariantKey: variantKey,
+        };
+      }),
+      originalVariantCount: input.variants.length,
+      usedVariantCount: input.variants.length,
+      maxExpandedVariants: input.variants.length,
+      reduced: false,
+    };
+  }
+
+  const placements = dedupePlacementSet(input.placementSet);
+  if (placements.length === 0) {
+    return prepareImagePromptVariantsForGeneration({ variants: input.variants });
+  }
+  const allowedBaseCount = Math.max(
+    1,
+    Math.floor(MAX_PLACEMENT_EXPANDED_VARIANTS / placements.length)
+  );
+  const usedVariants = input.variants.slice(0, allowedBaseCount);
+  const expanded: PreparedImagePromptVariant[] = [];
+  for (let i = 0; i < usedVariants.length; i += 1) {
+    const base = usedVariants[i]!;
+    const baseVariantKey = base.variantKey ?? `variant-${i}`;
+    const plan = buildPlacementExpansionPlan({ ...base, variantKey: baseVariantKey }, placements);
+    for (const expansion of plan.expansions) {
+      const preset = placementPresetByKey(expansion.placementKey);
+      expanded.push({
+        ...base,
+        variantKey: expansion.variantKey,
+        width: expansion.condition.width,
+        height: expansion.condition.height,
+        format: expansion.condition.format ?? "png",
+        aspectRatio: preset.aspectRatio,
+        sourceVariantIndex: i,
+        baseVariantKey: plan.baseVariantKey,
+        placementKey: expansion.placementKey,
+        placementLabel: preset.label,
+      });
+    }
+  }
+  return {
+    variants: expanded,
+    originalVariantCount: input.variants.length,
+    usedVariantCount: usedVariants.length,
+    maxExpandedVariants: MAX_PLACEMENT_EXPANDED_VARIANTS,
+    reduced: usedVariants.length < input.variants.length,
+  };
+}
+
+function buildPlacementExpansionMetadata(
+  prepared: ReturnType<typeof prepareImagePromptVariantsForGeneration>,
+  placementSet?: PlacementKey[]
+): Record<string, unknown> | null {
+  if (!placementSet || placementSet.length === 0) return null;
+  const placements = dedupePlacementSet(placementSet);
+  return {
+    placementSet: placements,
+    originalVariantCount: prepared.originalVariantCount,
+    usedVariantCount: prepared.usedVariantCount,
+    expandedVariantCount: prepared.variants.length,
+    maxExpandedVariants: prepared.maxExpandedVariants,
+    reduced: prepared.reduced,
+  };
+}
+
+function dedupePlacementSet(placements: readonly PlacementKey[]): PlacementKey[] {
+  return [...new Set(placements)];
 }

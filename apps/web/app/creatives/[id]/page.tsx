@@ -448,17 +448,27 @@ export default async function CreativeDetailPage({
             />
           ) : (
             <div className="creative-detail__previews">
-              {metadata!.assets.map((asset, assetIndex) => (
-                <CreativeAdPreview
-                  key={asset.assetId}
-                  accountName={row.account?.displayName || row.account?.key || "AdDroid"}
-                  displayName={row.displayName}
-                  adText={textForPreview(spec.adText, spec.textVariants, assetIndex)}
-                  imageSrc={`/api/creatives/${row.id}/asset/${asset.assetId}`}
-                  imageAlt={`creative ${row.displayName} variant ${asset.variantKey}`}
-                  selected
-                  caption={<CreativeAssetCaption asset={asset} />}
-                />
+              {groupAssetsByBaseVariant(metadata!.assets).map((group) => (
+                <section className="creative-detail__variant-group" key={group.baseVariantKey}>
+                  <div className="creative-detail__variant-group-header">
+                    <InlineCode>{group.baseVariantKey}</InlineCode>
+                    <span>{group.assets.length} size</span>
+                  </div>
+                  <div className="creative-detail__variant-group-grid">
+                    {group.assets.map(({ asset, assetIndex }) => (
+                      <CreativeAdPreview
+                        key={asset.assetId}
+                        accountName={row.account?.displayName || row.account?.key || "AdDroid"}
+                        displayName={row.displayName}
+                        adText={textForPreview(spec.adText, spec.textVariants, assetIndex)}
+                        imageSrc={`/api/creatives/${row.id}/asset/${asset.assetId}`}
+                        imageAlt={`creative ${row.displayName} variant ${asset.variantKey}`}
+                        selected
+                        caption={<CreativeAssetCaption asset={asset} />}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}
@@ -1192,6 +1202,30 @@ function CreativeAssetCaption({ asset }: { asset: CreativeMetadataAsset }) {
       </div>
     </div>
   );
+}
+
+function groupAssetsByBaseVariant(assets: CreativeMetadataAsset[]): Array<{
+  baseVariantKey: string;
+  assets: Array<{ asset: CreativeMetadataAsset; assetIndex: number }>;
+}> {
+  const groups = new Map<
+    string,
+    Array<{ asset: CreativeMetadataAsset; assetIndex: number }>
+  >();
+  assets.forEach((asset, assetIndex) => {
+    const baseVariantKey = asset.variantKey.split("--")[0] || asset.variantKey;
+    const list = groups.get(baseVariantKey);
+    const entry = { asset, assetIndex };
+    if (list) {
+      list.push(entry);
+    } else {
+      groups.set(baseVariantKey, [entry]);
+    }
+  });
+  return [...groups.entries()].map(([baseVariantKey, groupedAssets]) => ({
+    baseVariantKey,
+    assets: groupedAssets,
+  }));
 }
 
 function textForPreview(

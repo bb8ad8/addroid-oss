@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 配置別アスペクト比の自動展開
+
+- `placementSet` 指定時に 1 つの image_prompt 案を Feed/Stories/Reels/リンク広告向け複数アスペクト比へ決定論的に展開し、生成数上限と詳細画面の variant グループ表示を追加。
+
 ### Added — クリエイティブ実績フィードバックループ
 
 - 直近 28 日の creative 実績から勝ち/負けパターンと遺伝子別 insight を作る digest を追加し、`improvement_pr` の copy / image_prompt agent 入力へ注入するフィードバックループを追加。

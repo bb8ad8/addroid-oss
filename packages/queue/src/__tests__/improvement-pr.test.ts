@@ -2137,6 +2137,127 @@ test("regression fix: manifest YAML preserves generation.parameters (variationCo
   assert.match(manifest, /\+ {8}variantKey: "variant-1"/);
 });
 
+test("creatives: placementSet expands one prompt variant into multiple aspect-ratio assets", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  const pipeline = new FakePipelineRunner({
+    imagePromptVariants: [
+      {
+        variantKey: "concept-a",
+        prompt: "hero concept",
+        negativePrompt: "no clutter",
+        styleNotes: "keep product inside central safe area",
+      },
+    ],
+    creativeQaRecommendation: "approve",
+  });
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+  const creativeStorage = new FakeCreativeStorage();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    imageProvider: new MockImageProvider(),
+    creativeStorage,
+    placementSet: ["feed_square", "stories_reels"],
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(store.creativeCalls.length, 2);
+  assert.deepEqual(
+    store.creativeCalls.map((c) => c.displayName),
+    [
+      "Image variant 1 / フィード (正方形)",
+      "Image variant 1 / ストーリーズ/リール",
+    ]
+  );
+  assert.deepEqual(
+    store.creativeCalls.map((c) => c.prompt.variantKey),
+    ["concept-a--feed_square", "concept-a--stories_reels"]
+  );
+  const params = store.creativeCalls[0]!.parameters as {
+    variationConditions: Array<{ width: number; height: number; variantKey: string }>;
+    variantCount: number;
+    placementExpansion: { expandedVariantCount: number; reduced: boolean };
+  };
+  assert.equal(params.variantCount, 2);
+  assert.deepEqual(
+    params.variationConditions.map((c) => [c.width, c.height, c.variantKey]),
+    [
+      [1080, 1080, "concept-a--feed_square"],
+      [1080, 1920, "concept-a--stories_reels"],
+    ]
+  );
+  assert.deepEqual(params.placementExpansion, {
+    placementSet: ["feed_square", "stories_reels"],
+    originalVariantCount: 1,
+    usedVariantCount: 1,
+    expandedVariantCount: 2,
+    maxExpandedVariants: 12,
+    reduced: false,
+  });
+  assert.equal(store.creativeLinkCalls[0]!.creativeIds.length, 2);
+});
+
+test("creatives: placementSet caps expanded generation at twelve assets", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  const pipeline = new FakePipelineRunner({
+    imagePromptVariants: Array.from({ length: 6 }, (_, i) => ({
+      variantKey: `concept-${i}`,
+      prompt: `concept ${i}`,
+      negativePrompt: "n",
+      styleNotes: "s",
+    })),
+    creativeQaRecommendation: "approve",
+  });
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+  const creativeStorage = new FakeCreativeStorage();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    imageProvider: new MockImageProvider(),
+    creativeStorage,
+    placementSet: ["feed_square", "feed_vertical", "stories_reels", "link_landscape"],
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(store.creativeCalls.length, 12);
+  const params = store.creativeCalls[0]!.parameters as {
+    variantCount: number;
+    placementExpansion: { originalVariantCount: number; usedVariantCount: number; reduced: boolean };
+  };
+  assert.equal(params.variantCount, 12);
+  assert.deepEqual(params.placementExpansion, {
+    placementSet: ["feed_square", "feed_vertical", "stories_reels", "link_landscape"],
+    originalVariantCount: 6,
+    usedVariantCount: 3,
+    expandedVariantCount: 12,
+    maxExpandedVariants: 12,
+    reduced: true,
+  });
+  assert.ok(
+    store.creativeCalls.every((c) =>
+      String(c.prompt.variantKey).startsWith("concept-")
+    )
+  );
+});
+
 test("attachment: PR body includes 生成クリエイティブ section with rationale, QA breakdown, preview, and risk", async () => {
   const store = new FakeImprovementPrStore(ACCOUNT);
   const pipeline = new FakePipelineRunner({
