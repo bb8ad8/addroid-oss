@@ -96,6 +96,10 @@ import {
 import { runMetaMirrorSync } from "../../../worker/src/lib/meta-mirror-runtime.js";
 import { buildPrismaMetaAdapterSelection } from "../../../worker/src/lib/meta-runtime.js";
 import { runMetaAdsReadOnlyQuery } from "../../../worker/src/lib/meta-ads-readonly-runtime.js";
+import {
+  runPerformanceCompareCatalogTool,
+  runPerformanceQueryCatalogTool,
+} from "../../../worker/src/lib/query-catalog-runtime.js";
 
 type ChatCommandName =
   | "doctor"
@@ -1291,6 +1295,12 @@ async function executeUserFacingTool(
   }
   if (tool.tool === "query_meta_ads") {
     return await runMetaAdsReadOnlyForChat(tool, opts);
+  }
+  if (tool.tool === "query_performance") {
+    return await runPerformanceQueryForChat(tool, opts);
+  }
+  if (tool.tool === "compare_performance") {
+    return await runPerformanceCompareForChat(tool, opts);
   }
   if (tool.tool === "sync_meta_mirror") {
     return await syncMetaMirrorForChat(tool, opts);
@@ -2534,6 +2544,48 @@ async function runMetaAdsReadOnlyForChat(
     };
   } catch (err) {
     const message = `Meta Ads の読み取りを実行できませんでした: ${(err as Error).message}`;
+    opts.out.write(`${message}\n`);
+    return { handled: true, code: 1, message };
+  }
+}
+
+async function runPerformanceQueryForChat(
+  tool: ReadyAgentTool,
+  opts: {
+    out: NodeJS.WritableStream;
+    env: NodeJS.ProcessEnv;
+  }
+): Promise<{ handled: true; code: number; message: string; data?: unknown }> {
+  try {
+    const { prisma } = await resolveCliChatDb(opts.env);
+    const result = await runPerformanceQueryCatalogTool({
+      prisma,
+      args: tool.toolArgs,
+    });
+    return { handled: true, code: 0, message: result.message, data: result.result };
+  } catch (err) {
+    const message = `パフォーマンス集計を実行できませんでした: ${(err as Error).message}`;
+    opts.out.write(`${message}\n`);
+    return { handled: true, code: 1, message };
+  }
+}
+
+async function runPerformanceCompareForChat(
+  tool: ReadyAgentTool,
+  opts: {
+    out: NodeJS.WritableStream;
+    env: NodeJS.ProcessEnv;
+  }
+): Promise<{ handled: true; code: number; message: string; data?: unknown }> {
+  try {
+    const { prisma } = await resolveCliChatDb(opts.env);
+    const result = await runPerformanceCompareCatalogTool({
+      prisma,
+      args: tool.toolArgs,
+    });
+    return { handled: true, code: 0, message: result.message, data: result.result };
+  } catch (err) {
+    const message = `パフォーマンス比較を実行できませんでした: ${(err as Error).message}`;
     opts.out.write(`${message}\n`);
     return { handled: true, code: 1, message };
   }

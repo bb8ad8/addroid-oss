@@ -225,6 +225,7 @@ export function buildAgentSystemPrompt(
     renderToolManifestForPrompt(surface, language),
     "Users may also type slash shortcuts such as /status, /report, /submit, /connect, /account, /schedule, and /open. Interpret those as normal user intent and choose the appropriate tool.",
     "Choose tools by user intent and recent chat context. Use get_report for user-facing daily, budget, and improvement reports because it returns the standard AdDroid summary/commentary format. Use metricDate as YYYY-MM-DD for explicit calendar dates and metricDateRelative for relative dates. Use query_meta_ads for raw read-only Meta Ads inspection, hierarchy lookup, and specific field/object checks. Treat read-only query results as internal evidence: in the final user-facing answer, mention only the facts needed for the user's request and do not dump unrelated rows, catalogs, or full object lists.",
+    "Use query_performance for natural-language ranking questions such as top campaigns by spend, best CPA, or recent CTR. Use compare_performance for two-window changes. These tools are safe predefined aggregations; never invent SQL or ask for raw SQL. When reporting query_performance results, include the value, period, and target. If a result has lowSample=true, say サンプル不足のため参考値.",
     "Before asking the user for missing ad-operation details, decide whether the missing value is likely available through Meta Ads read-only data. If it is, autonomously run narrow query_meta_ads lookups first, such as get by known campaign/adset/ad/creative/page IDs or parent-filtered lists with small limits. Ask the user only after those read-only lookups cannot resolve the value or the choice is genuinely business context.",
     "You are allowed to inspect read-only data freely. When the user wants a one-time production mutation such as pause, activate, budget change, targeting change, create, update, or delete, never mutate Meta directly; use propose_ops_change to create a GitOps PR for human review. For common pause/activate/budget changes, pass targets + desiredChanges. For less common Meta mutations, pass propose_ops_change.operations as Graph manifest actions with kind and payload, not CLI args. Put official Meta Graph API snake_case fields that are not modeled as typed aliases under payload.graphPayload; graphPayload overrides aliases. Never include access_token or read-only fields such as id/account_id/created_time/updated_time/effective_status/configured_status/issues_info/recommendations. For budget changes, first inspect current Meta campaign/adset budget fields and pass an explicit target level. Campaign budgets and adset budgets are separate; if the requested object does not actually carry the budget, target the object that does or ask before creating a PR.",
     "When the user asks only to generate new creative ideas/images for the /creatives library, use generate_creatives and do not ask about campaign/adset placement, CTA, optimizationGoal, billingEvent, or Meta delivery settings because generation does not submit to Meta. If the user provides a landing page or destination URL for creative generation, pass it as linkUrl or destinationUrl; the generator may ask the LLM to inspect that URL and include the page context. When the user wants to submit or create a PR from existing /creatives item(s) or Creative ID(s), use promote_creative_submission so the stored image and stored Meta ad text are reused. If multiple Creative IDs are already selected, pass all selected IDs as creativeIds and ask only for missing submission settings, not which creative to use. When the user wants to generate, upload, or submit ad creative as an ad/campaign/adset or asks for a PR without an existing Creative ID, use propose_creative_submission for Graph API-backed submission. Always choose and pass placementMode: existing_adset, new_adset, or new_campaign. existing_adset requires campaignId+adsetId as the destination. new_adset requires campaignId as the parent plus adsetName+optimizationGoal+billingEvent. new_campaign requires campaignName+adsetName+objective+optimizationGoal+billingEvent and a budget; dailyBudget is campaign-level by default for new_campaign, while adsetDailyBudget is only for an explicit adset-level budget. If the user says to use the same settings as an existing/active campaign or adset while creating a new campaign, use the existing IDs only as inheritFromCampaignId/inheritFromAdsetId, never as campaignId/adsetId destinations. Budget and bid amounts are account-currency major units; for a JPY account, 500円/日は dailyBudget:500. Meta account sync and account listing include an asset readiness check; use those results to avoid asking non-engineers to find raw Page / Instagram IDs when the system can infer evidence from the ad account, page connection, adset promoted_object, or existing creative object_story_spec. Collect or infer pageId, body/title/link/description/CTA, instagramUserId, DCO arrays, optimizationGoal, optimizationSubEvent, billingEvent, bid strategy/amount, attributionSpec, destinationType, schedule, DSA/regulatory fields, pixel/custom event, ad tracking/conversion specs, targeting, and countries when relevant. Use campaignGraphPayload/adsetGraphPayload/creativeGraphPayload/adGraphPayload for official snake_case Graph fields without aliases; raw graph payload overrides aliases and must not include access_token/read-only fields. If images are attached as references for generation, pass them as referenceImagePaths and set generateImage:true for propose_creative_submission, or pass them as referenceImagePaths for generate_creatives. Use localMediaPaths only when the attached files themselves should be the final ad media. Ask concise clarification questions before calling propose_creative_submission or promote_creative_submission if placement, pageId, optimization/billing, budget, destination link, country targeting, or required copy is missing.",
@@ -534,6 +535,24 @@ function resolveTool(
         args: [],
         toolArgs: tool.args,
         display: "Meta Graph read-only query",
+        why: tool.why,
+      };
+    case "query_performance":
+      return {
+        tool: name,
+        command: null,
+        args: [],
+        toolArgs: tool.args,
+        display: "performance query",
+        why: tool.why,
+      };
+    case "compare_performance":
+      return {
+        tool: name,
+        command: null,
+        args: [],
+        toolArgs: tool.args,
+        display: "performance comparison",
         why: tool.why,
       };
     default:

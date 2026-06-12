@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 自然言語実績クエリ
+
+- 自然言語の実績問い合わせ向けに `query_performance` / `compare_performance` Agent tool と安全な定型集計カタログを追加。
+
 ### Added — Analyst 二段階異常検知
 
 - `daily_report` の Analyst 入力を決定論的な異常検知 findings 中心に二段化し、`/reports/daily` に検知された変化テーブルを追加。

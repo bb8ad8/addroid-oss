@@ -104,6 +104,10 @@ import {
 } from "../../worker/src/lib/approval-decision-runtime";
 import { runMetaMirrorSync } from "../../worker/src/lib/meta-mirror-runtime";
 import { runMetaAdsReadOnlyQuery } from "../../worker/src/lib/meta-ads-readonly-runtime";
+import {
+  runPerformanceCompareCatalogTool,
+  runPerformanceQueryCatalogTool,
+} from "../../worker/src/lib/query-catalog-runtime";
 
 export interface WebAgentExecution {
   display: string;
@@ -661,6 +665,10 @@ export async function executeWebAgentTool(
         return await runSubmissionCheck(workspaceId, tool.toolArgs, tool.display);
       case "show_logs":
         return await showRecentLogs(tool.toolArgs, tool.display);
+      case "query_performance":
+        return await runPerformanceQueryTool(tool.toolArgs, tool.display);
+      case "compare_performance":
+        return await runPerformanceCompareTool(tool.toolArgs, tool.display);
       case "query_meta_ads":
         return await runMetaAdsReadOnlyTool(workspaceId, tool.toolArgs, tool.display);
       case "sync_meta_mirror":
@@ -2068,6 +2076,50 @@ async function runMetaAdsReadOnlyTool(
       display,
       status: "error",
       message: `Meta Ads の読み取りを実行できませんでした: ${(err as Error).message}`,
+    };
+  }
+}
+
+async function runPerformanceQueryTool(
+  args: Record<string, unknown>,
+  display: string
+): Promise<WebAgentExecution> {
+  try {
+    const result = await runPerformanceQueryCatalogTool({ prisma, args });
+    return {
+      display,
+      status: "ok",
+      message: result.message,
+      data: result.result,
+      visible: false,
+    };
+  } catch (err) {
+    return {
+      display,
+      status: "error",
+      message: `パフォーマンス集計を実行できませんでした: ${(err as Error).message}`,
+    };
+  }
+}
+
+async function runPerformanceCompareTool(
+  args: Record<string, unknown>,
+  display: string
+): Promise<WebAgentExecution> {
+  try {
+    const result = await runPerformanceCompareCatalogTool({ prisma, args });
+    return {
+      display,
+      status: "ok",
+      message: result.message,
+      data: result.result,
+      visible: false,
+    };
+  } catch (err) {
+    return {
+      display,
+      status: "error",
+      message: `パフォーマンス比較を実行できませんでした: ${(err as Error).message}`,
     };
   }
 }

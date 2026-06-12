@@ -12,6 +12,7 @@ import {
   evaluateAgentToolPolicy,
   runAgentTurn,
 } from "../runtime.js";
+import { isToolAllowedOnSurface } from "../manifest.js";
 
 test("runAgentTurn does not infer natural-language tools when LLM returns 429", async () => {
   const provider = new ThrowingProvider("chat completions endpoint returned HTTP 429", 429);
@@ -47,6 +48,22 @@ test("query_meta_ads policy allows read-only catalog/product queries and denies 
   });
   assert.equal(denied.allowed, false);
   assert.match(denied.reason ?? "", /read-only/);
+});
+
+test("performance query tools are exposed to web chat and deny raw query shapes", () => {
+  assert.equal(isToolAllowedOnSurface("query_performance", "web-chat"), true);
+  assert.equal(isToolAllowedOnSurface("compare_performance", "web-chat"), true);
+  assert.equal(isToolAllowedOnSurface("query_performance", "scheduled-agent"), true);
+  assert.equal(
+    evaluateAgentToolPolicy("query_performance", {
+      accountId: "acc-1",
+      level: "campaign",
+      window: { preset: "last_7d" },
+      metric: "cpa",
+      sql: "select * from performance_snapshots",
+    }).allowed,
+    false
+  );
 });
 
 test("system prompt exposes scheduled task creation to chat surfaces only", () => {
@@ -90,6 +107,20 @@ test("system prompt tells the agent to resolve Meta-readable missing values befo
   assert.match(prompt, /narrow query_meta_ads follow-up lookups/);
 });
 
+test("system prompt guides performance queries and low sample wording", () => {
+  const prompt = buildAgentSystemPrompt(
+    {
+      content: "test agent context",
+      webUrl: "http://127.0.0.1:3000",
+      loadedDocs: ["test"],
+    },
+    "web-chat"
+  );
+  assert.match(prompt, /query_performance/);
+  assert.match(prompt, /compare_performance/);
+  assert.match(prompt, /サンプル不足のため参考値/);
+});
+
 test("runAgentTurn resolves create_scheduled_agent_task on cli-chat", async () => {
   const provider = new StaticProvider(
     JSON.stringify({
@@ -123,6 +154,49 @@ test("runAgentTurn resolves create_scheduled_agent_task on cli-chat", async () =
   assert.equal(tool.tool, "create_scheduled_agent_task");
   assert.equal(tool.command, null);
   assert.equal(tool.toolArgs.cron, "0 9 * * *");
+});
+
+test("runAgentTurn resolves natural-language performance ranking to query_performance", async () => {
+  const provider = new StaticProvider(
+    JSON.stringify({
+      message: "直近7日のCPAが良いキャンペーンを確認します。",
+      tools: [
+        {
+          name: "query_performance",
+          args: {
+            accountId: "acc-1",
+            level: "campaign",
+            window: { preset: "last_7d" },
+            metric: "cpa",
+            rank: "bottom",
+            limit: 3,
+            statusFilter: "all",
+          },
+          why: "直近7日でCPAが良いキャンペーン上位3件を集計するため",
+        },
+      ],
+    })
+  );
+  const result = await runAgentTurn({
+    input: "直近7日でCPAが良いキャンペーン上位3件",
+    provider,
+    agentContext: {
+      content: "test agent context",
+      webUrl: "http://127.0.0.1:3000",
+      loadedDocs: ["test"],
+    },
+    purpose: "test",
+    surface: "web-chat",
+  });
+  const tool = result.toolResults[0];
+  assert.equal(tool?.status, "ready");
+  if (tool?.status !== "ready") throw new Error("expected ready tool");
+  assert.equal(tool.tool, "query_performance");
+  assert.equal(tool.command, null);
+  assert.deepEqual(tool.toolArgs.window, { preset: "last_7d" });
+  assert.equal(tool.toolArgs.metric, "cpa");
+  assert.equal(tool.toolArgs.rank, "bottom");
+  assert.equal(tool.toolArgs.limit, 3);
 });
 
 test("runAgentTurn denies unavailable tools on scheduled-agent surface", async () => {

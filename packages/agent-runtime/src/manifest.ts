@@ -266,6 +266,24 @@ export const AGENT_TOOL_MANIFEST = [
       "Use narrow read-only lookups to resolve factual missing values before asking the user, especially pageId, instagramUserId, linkUrl, existing creative, current active campaign/adset/ad, budget fields, status, objective, optimization, and billing fields. Prefer get by known ID or parent-filtered list with a small limit. Do not use this for mutations.",
   },
   {
+    name: "query_performance",
+    description: "Mirror DB の安全な定型集計で広告パフォーマンスを順位付き取得する。",
+    args: "{accountId:string, level:'account'|'campaign'|'adset'|'ad', window:{preset:'today'|'yesterday'|'last_7d'|'last_14d'|'last_30d'}|{since:'YYYY-MM-DD', until:'YYYY-MM-DD'}, metric:'spend'|'impressions'|'clicks'|'conversions'|'ctr'|'cpc'|'cpm'|'cpa'|'frequency', rank?:'top'|'bottom', limit?:number, statusFilter?:'active'|'paused'|'all'}",
+    effects: ["read"],
+    allowedSurfaces: ["cli-chat", "web-chat", "slack-chat", "scheduled-agent"],
+    guidance:
+      "Use this for natural-language performance ranking questions. It accepts only catalog fields, never SQL. Ratio metrics are computed from period sums. For efficiency metrics like cpa/cpc, use rank:'bottom' when the user asks for good/best/cheap results.",
+  },
+  {
+    name: "compare_performance",
+    description: "Mirror DB の安全な定型集計で2期間の広告パフォーマンス変化を比較する。",
+    args: "{accountId:string, level:'account'|'campaign'|'adset'|'ad', currentWindow:{preset:'today'|'yesterday'|'last_7d'|'last_14d'|'last_30d'}|{since:'YYYY-MM-DD', until:'YYYY-MM-DD'}, baselineWindow:{preset:'today'|'yesterday'|'last_7d'|'last_14d'|'last_30d'}|{since:'YYYY-MM-DD', until:'YYYY-MM-DD'}, metric:'spend'|'impressions'|'clicks'|'conversions'|'ctr'|'cpc'|'cpm'|'cpa'|'frequency', rank?:'top'|'bottom', limit?:number, statusFilter?:'active'|'paused'|'all'}",
+    effects: ["read"],
+    allowedSurfaces: ["cli-chat", "web-chat", "slack-chat", "scheduled-agent"],
+    guidance:
+      "Use this for before/after or period-over-period questions. It accepts only catalog fields, never SQL, and ranks by relative change while keeping low-sample rows flagged.",
+  },
+  {
     name: "sync_meta_mirror",
     description:
       "Meta の現在状態を Mirror DB に同期し、/campaigns や各チャット系の表示元を最新化する。Meta 側は変更しない。",
@@ -329,6 +347,8 @@ const ENGLISH_TOOL_DESCRIPTIONS: Record<string, string> = {
   backup_data: "Create an AdDroid database backup.",
   open_web_ui: "Show the local Web UI URL.",
   query_meta_ads: "Run a read-only query against Meta Graph API / Mirror DB.",
+  query_performance: "Run a safe cataloged aggregate performance query against the Mirror DB.",
+  compare_performance: "Compare two safe cataloged aggregate performance windows in the Mirror DB.",
   sync_meta_mirror: "Sync current Meta state into the Mirror DB without changing Meta.",
 };
 

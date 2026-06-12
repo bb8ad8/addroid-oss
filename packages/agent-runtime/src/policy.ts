@@ -95,6 +95,15 @@ export function evaluateAgentToolPolicy(
       };
     }
   }
+  if (normalizedName === "query_performance" || normalizedName === "compare_performance") {
+    const forbiddenKeys = new Set(["sql", "query", "raw_sql", "rawsql", "statement"]);
+    if (containsForbiddenQueryKey(args, forbiddenKeys)) {
+      return {
+        allowed: false,
+        reason: `${toolName} only accepts predefined query catalog arguments`,
+      };
+    }
+  }
   const text = JSON.stringify({ toolName, args });
   for (const pattern of DANGEROUS_TEXT_PATTERNS) {
     if (pattern.test(text)) {
@@ -121,4 +130,14 @@ export function isDeniedAgentRequest(input: string): AgentPolicyDecision {
 
 function normalizeToken(value: string): string {
   return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function containsForbiddenQueryKey(value: unknown, forbiddenKeys: Set<string>): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => containsForbiddenQueryKey(item, forbiddenKeys));
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (forbiddenKeys.has(normalizeToken(key))) return true;
+    if (containsForbiddenQueryKey(nested, forbiddenKeys)) return true;
+  }
+  return false;
 }

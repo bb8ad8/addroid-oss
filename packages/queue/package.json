@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@addroid/llm-provider": "*",
-    "pg-boss": "^10.1.5"
+    "pg-boss": "^10.1.5",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "tsx": "^4.16.5",

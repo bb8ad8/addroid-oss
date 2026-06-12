@@ -78,6 +78,10 @@ import {
 } from "./approval-decision-runtime.js";
 import { buildPrismaMetaAdapterSelection } from "./meta-runtime.js";
 import { runMetaMirrorSync } from "./meta-mirror-runtime.js";
+import {
+  runPerformanceCompareCatalogTool,
+  runPerformanceQueryCatalogTool,
+} from "./query-catalog-runtime.js";
 
 export interface RunDueAgentTasksOptions {
   prisma: PrismaClient;
@@ -479,6 +483,46 @@ export async function executeWorkerAgentTool(opts: {
         return await runSubmissionCheck({ ...opts, tool: readyTool });
       case "show_logs":
         return await showRecentLogs({ ...opts, tool: readyTool });
+      case "query_performance": {
+        try {
+          const result = await runPerformanceQueryCatalogTool({
+            prisma: opts.prisma,
+            args: readyTool.toolArgs,
+          });
+          return {
+            display: readyTool.display,
+            status: "ok",
+            message: result.message,
+            data: result.result,
+          };
+        } catch (err) {
+          return {
+            display: readyTool.display,
+            status: "error",
+            message: `パフォーマンス集計を実行できませんでした: ${(err as Error).message}`,
+          };
+        }
+      }
+      case "compare_performance": {
+        try {
+          const result = await runPerformanceCompareCatalogTool({
+            prisma: opts.prisma,
+            args: readyTool.toolArgs,
+          });
+          return {
+            display: readyTool.display,
+            status: "ok",
+            message: result.message,
+            data: result.result,
+          };
+        } catch (err) {
+          return {
+            display: readyTool.display,
+            status: "error",
+            message: `パフォーマンス比較を実行できませんでした: ${(err as Error).message}`,
+          };
+        }
+      }
       case "query_meta_ads": {
         const result = await runMetaAdsReadOnlyQuery({
           prisma: opts.prisma,
