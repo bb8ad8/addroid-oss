@@ -54,7 +54,7 @@ class FakeImprovementPrStore implements ImprovementPrStore {
   private nextCreativeId = 1;
   constructor(
     account: DailyReportAdAccountSnapshot | null,
-    private readonly creativePerformanceRows?: CreativePerformanceJoinedRow[]
+    private readonly creativePerformanceRows?: CreativePerformanceJoinedRow[],
   ) {
     this.account = account;
   }
@@ -137,7 +137,7 @@ function creativePerformanceRow(input: {
 }
 
 function makeAiRunInput(
-  overrides: Partial<AiRunCreateInputData> = {}
+  overrides: Partial<AiRunCreateInputData> = {},
 ): AiRunCreateInputData {
   return {
     workspaceId: "ws-1",
@@ -181,6 +181,7 @@ interface PipelineFailures {
 
 interface PipelineOverrides {
   failures?: PipelineFailures;
+  copyCarousel?: ImprovementPrCopyOutput["carousel"];
   imagePromptVariants?: ImprovementPrImagePromptOutput["variants"];
   imagePromptRationale?: string;
   creativeQaRecommendation?: "approve" | "request_changes" | "reject";
@@ -198,7 +199,7 @@ interface PipelineOverrides {
 
 function aiRun(
   agent: AiRunCreateInputData["agent"],
-  failed = false
+  failed = false,
 ): AiRunCreateInputData {
   return makeAiRunInput({
     agent,
@@ -212,18 +213,23 @@ function aiRun(
 function ok<T>(
   agent: AiRunCreateInputData["agent"],
   output: T,
-  decisionOverride?: string
+  decisionOverride?: string,
 ): ImprovementPrAgentRunResult<T> & { decision?: string | null } {
   const aiRunInput = makeAiRunInput({
     agent,
     decision: decisionOverride ?? "propose",
     outputs: output as unknown,
   });
-  return { aiRunInput, output, error: null, decision: decisionOverride ?? null };
+  return {
+    aiRunInput,
+    output,
+    error: null,
+    decision: decisionOverride ?? null,
+  };
 }
 
 function fail<T>(
-  agent: AiRunCreateInputData["agent"]
+  agent: AiRunCreateInputData["agent"],
 ): ImprovementPrAgentRunResult<T> & { decision: null } {
   return {
     aiRunInput: aiRun(agent, true),
@@ -235,13 +241,16 @@ function fail<T>(
 
 class FakePipelineRunner implements ImprovementPrPipelineRunner {
   calls: string[] = [];
-  analystInputs: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0][] = [];
+  analystInputs: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0][] =
+    [];
   copyInputs: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0][] = [];
-  imagePromptInputs: Parameters<ImprovementPrPipelineRunner["runImagePrompt"]>[0][] = [];
+  imagePromptInputs: Parameters<
+    ImprovementPrPipelineRunner["runImagePrompt"]
+  >[0][] = [];
   constructor(private readonly cfg: PipelineOverrides = {}) {}
 
   async runAnalyst(
-    input: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0]
+    input: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0],
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrAnalystOutput>> {
     this.calls.push("analyst");
     this.analystInputs.push(input);
@@ -253,7 +262,7 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
     });
   }
   async runStrategy(
-    _input: unknown
+    _input: unknown,
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrStrategyOutput>> {
     this.calls.push("strategy");
     if (this.cfg.failures?.strategy) return fail("strategy");
@@ -266,7 +275,7 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
     });
   }
   async runCopy(
-    input: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0]
+    input: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0],
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrCopyOutput>> {
     this.calls.push("copy");
     this.copyInputs.push(input);
@@ -275,42 +284,48 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
       primary: { headline: "Try it", primaryText: "...", cta: "Sign up" },
       alternates: [],
       rationale: "tighter copy",
+      ...(this.cfg.copyCarousel ? { carousel: this.cfg.copyCarousel } : {}),
     });
   }
   async runImagePrompt(
-    input: Parameters<ImprovementPrPipelineRunner["runImagePrompt"]>[0]
+    input: Parameters<ImprovementPrPipelineRunner["runImagePrompt"]>[0],
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrImagePromptOutput>> {
     this.calls.push("image_prompt");
     this.imagePromptInputs.push(input);
     if (this.cfg.failures?.imagePrompt) return fail("image_prompt");
     return ok("image_prompt", {
-      variants:
-        this.cfg.imagePromptVariants ?? [
-          { prompt: "p", negativePrompt: "n", styleNotes: "s" },
-        ],
+      variants: this.cfg.imagePromptVariants ?? [
+        { prompt: "p", negativePrompt: "n", styleNotes: "s" },
+      ],
       rationale: this.cfg.imagePromptRationale ?? "product hero",
     });
   }
   async runCreativeQa(
-    _input: unknown
+    _input: unknown,
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrCreativeQaOutput>> {
     this.calls.push("creative_qa");
     if (this.cfg.failures?.creativeQa) return fail("creative_qa");
-    const recommendation =
-      this.cfg.creativeQaRecommendation ?? "approve";
+    const recommendation = this.cfg.creativeQaRecommendation ?? "approve";
     const issues = this.cfg.creativeQaIssues ?? [];
     const rationale = this.cfg.creativeQaRationale ?? "ok";
     return {
       aiRunInput: makeAiRunInput({
         agent: "creative_qa",
         decision: recommendation,
-        outputs: { recommendation, issues, rationale, genes: this.cfg.creativeQaGenes ?? null },
+        outputs: {
+          recommendation,
+          issues,
+          rationale,
+          genes: this.cfg.creativeQaGenes ?? null,
+        },
       }),
       output: {
         issues,
         recommendation,
         rationale,
-        ...(this.cfg.creativeQaGenes ? { genes: this.cfg.creativeQaGenes } : {}),
+        ...(this.cfg.creativeQaGenes
+          ? { genes: this.cfg.creativeQaGenes }
+          : {}),
       },
       error: null,
     };
@@ -318,22 +333,28 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
   async runMediaBuyer(_input: unknown) {
     this.calls.push("media_buyer");
     if (this.cfg.failures?.mediaBuyer) {
-      return { ...fail<ImprovementPrMediaBuyerOutput>("media_buyer"), decision: null };
+      return {
+        ...fail<ImprovementPrMediaBuyerOutput>("media_buyer"),
+        decision: null,
+      };
     }
     const decision = this.cfg.mediaBuyerDecision ?? "propose";
-    const proposals =
-      this.cfg.mediaBuyerProposals ?? [
-        {
-          hierarchy: "campaign" as const,
-          target: "cmp_1",
-          category: "copy_update",
-          proposedChange: "headline tweak",
-          rationale: "+CTR",
-        },
-      ];
+    const proposals = this.cfg.mediaBuyerProposals ?? [
+      {
+        hierarchy: "campaign" as const,
+        target: "cmp_1",
+        category: "copy_update",
+        proposedChange: "headline tweak",
+        rationale: "+CTR",
+      },
+    ];
     const output: ImprovementPrMediaBuyerOutput = {
       proposals,
-      budgetImpact: { deltaCurrency: 0, afterCurrency: 5000, notes: "no change" },
+      budgetImpact: {
+        deltaCurrency: 0,
+        afterCurrency: 5000,
+        notes: "no change",
+      },
       dryRunSummary: "dry-run: no mutation",
       rationale: "low risk",
     };
@@ -410,15 +431,17 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
 class FakePublisher implements ImprovementPrGithubPublisher {
   calls: ImprovementPrPullRequestRequest[] = [];
   constructor(
-    private readonly result: ImprovementPrPullRequestRecord | { throw: string } = {
+    private readonly result:
+      | ImprovementPrPullRequestRecord
+      | { throw: string } = {
       pullRequestId: "pr-1",
       prNumber: 42,
       htmlUrl: "https://example.invalid/pull/42",
       headSha: "deadbeef",
-    }
+    },
   ) {}
   async createPullRequest(
-    req: ImprovementPrPullRequestRequest
+    req: ImprovementPrPullRequestRequest,
   ): Promise<ImprovementPrPullRequestRecord> {
     this.calls.push(req);
     if ("throw" in this.result) throw new Error(this.result.throw);
@@ -438,7 +461,7 @@ class FakePlanValidator implements ImprovementPrPlanValidator {
   constructor(
     private readonly result:
       | ImprovementPrPlanValidationResult
-      | { throw: string } = okPlanResult()
+      | { throw: string } = okPlanResult(),
   ) {}
   async validate(input: {
     accountKey: string;
@@ -451,7 +474,7 @@ class FakePlanValidator implements ImprovementPrPlanValidator {
 }
 
 function okPlanResult(
-  overrides: Partial<ImprovementPrPlanValidationResult> = {}
+  overrides: Partial<ImprovementPrPlanValidationResult> = {},
 ): ImprovementPrPlanValidationResult {
   return {
     available: true,
@@ -573,17 +596,14 @@ test("pipeline: runImprovementPrOnce runs all 8 agents, opens PR, writes audit",
   assert.equal(planValidator.calls[0]!.files.length, 2);
   assert.equal(
     planValidator.calls[0]!.files[1]!.path,
-    "evidence/creatives/primary/creative-1.yaml"
+    "evidence/creatives/primary/creative-1.yaml",
   );
   assert.equal(planValidator.calls[0]!.files[1]!.action, "create");
   assert.match(publisher.calls[0]!.prBody, /status: `ok`/);
   assert.match(publisher.calls[0]!.prBody, /counts: \+0 ~1 -0/);
   // The LLM-authored dryRunSummary string must NOT appear in the PR body
   // anymore — only the deterministic plan result does.
-  assert.doesNotMatch(
-    publisher.calls[0]!.prBody,
-    /dry-run: no mutation/
-  );
+  assert.doesNotMatch(publisher.calls[0]!.prBody, /dry-run: no mutation/);
   // Audit was written
   assert.equal(audit.calls.length, 1);
   assert.equal(audit.calls[0]!.action, "improvement_pr.opened");
@@ -593,10 +613,19 @@ test("pipeline: runImprovementPrOnce runs all 8 agents, opens PR, writes audit",
   assert.equal(summary.classification, "requires_approval");
   assert.equal(summary.auditDecision, "approval_required");
   assert.equal(summary.pullRequest?.prNumber, 42);
-  assert.equal(pipeline.analystInputs[0]!.analysisWindow.periodStart, "2026-05-04");
-  assert.equal(pipeline.analystInputs[0]!.analysisWindow.periodEnd, "2026-05-10");
+  assert.equal(
+    pipeline.analystInputs[0]!.analysisWindow.periodStart,
+    "2026-05-04",
+  );
+  assert.equal(
+    pipeline.analystInputs[0]!.analysisWindow.periodEnd,
+    "2026-05-10",
+  );
   assert.equal(pipeline.analystInputs[0]!.analysisWindow.current.spend, 7000);
-  assert.equal(pipeline.analystInputs[0]!.analysisWindow.prior?.conversions, 20);
+  assert.equal(
+    pipeline.analystInputs[0]!.analysisWindow.prior?.conversions,
+    20,
+  );
   // regression fix: audit metadata records the structured plan result, not
   // the LLM-authored dryRunSummary text.
   const planMeta = audit.calls[0]!.metadata.planValidation as {
@@ -642,15 +671,25 @@ test("pipeline: creative performance digest is injected into copy and image_prom
   assert.ok(pipeline.copyInputs[0]!.performanceDigest);
   assert.ok(pipeline.imagePromptInputs[0]!.performanceDigest);
   assert.deepEqual(
-    pipeline.copyInputs[0]!.performanceDigest!.winners.map((entry) => entry.creativeId),
-    ["winner"]
+    pipeline.copyInputs[0]!.performanceDigest!.winners.map(
+      (entry) => entry.creativeId,
+    ),
+    ["winner"],
   );
   assert.deepEqual(
-    pipeline.imagePromptInputs[0]!.performanceDigest!.losers.map((entry) => entry.creativeId),
-    ["loser"]
+    pipeline.imagePromptInputs[0]!.performanceDigest!.losers.map(
+      (entry) => entry.creativeId,
+    ),
+    ["loser"],
   );
-  assert.equal(pipeline.copyInputs[0]!.performanceDigest!.periodStart, "2026-05-04");
-  assert.equal(pipeline.copyInputs[0]!.performanceDigest!.periodEnd, "2026-05-31");
+  assert.equal(
+    pipeline.copyInputs[0]!.performanceDigest!.periodStart,
+    "2026-05-04",
+  );
+  assert.equal(
+    pipeline.copyInputs[0]!.performanceDigest!.periodEnd,
+    "2026-05-31",
+  );
 });
 
 test("pipeline: auto_creative_generation stops after creative QA and does not open PR", async () => {
@@ -684,7 +723,10 @@ test("pipeline: auto_creative_generation stops after creative QA and does not op
   ]);
   assert.equal(store.creativeCalls.length, 1);
   assert.deepEqual(summary.creativeIds, ["creative-1"]);
-  assert.equal(store.creativeCalls[0]!.storageRef, "storage://creatives/primary/imgrun_run-4");
+  assert.equal(
+    store.creativeCalls[0]!.storageRef,
+    "storage://creatives/primary/imgrun_run-4",
+  );
   assert.equal(store.creativeCalls[0]!.provider, "mock");
   assert.equal(publisher.calls.length, 0);
   assert.equal(planValidator.calls.length, 0);
@@ -692,7 +734,7 @@ test("pipeline: auto_creative_generation stops after creative QA and does not op
   assert.equal(audit.calls[0]!.action, "improvement_pr.skipped");
   assert.equal(
     audit.calls[0]!.metadata.skippedAt,
-    "auto_creative_generation_complete"
+    "auto_creative_generation_complete",
   );
   const imageGeneration = audit.calls[0]!.metadata.imageGeneration as {
     persistedImageCount: number;
@@ -786,10 +828,7 @@ test("plan: validator errors land in PR body and audit metadata, PR is still ope
   assert.equal(planMeta.risk, "error");
   assert.equal(planMeta.counts.errors, 1);
   assert.equal(planMeta.errors.length, 1);
-  assert.equal(
-    planMeta.errors[0]!.file,
-    "operations/primary/cmp_1.json"
-  );
+  assert.equal(planMeta.errors[0]!.file, "operations/primary/cmp_1.json");
 });
 
 test("plan: validator unavailable surfaces skipped status in PR and audit, PR is still opened", async () => {
@@ -822,7 +861,7 @@ test("plan: validator unavailable surfaces skipped status in PR and audit, PR is
   assert.match(publisher.calls[0]!.prBody, /status: `skipped`/);
   assert.match(
     publisher.calls[0]!.prBody,
-    /ADDROID_OPS_REPO_LOCAL_DIR not set/
+    /ADDROID_OPS_REPO_LOCAL_DIR not set/,
   );
   const planMeta = audit.calls[0]!.metadata.planValidation as {
     available: boolean;
@@ -978,7 +1017,7 @@ test("pipeline: dangerous + auto_blocked skips PR and records auto_blocked audit
   assert.deepEqual(audit.calls[0]!.dangerousCategories, ["budget_increase"]);
   assert.equal(
     (audit.calls[0]!.metadata as { skippedAt: string }).skippedAt,
-    "policy_auto_blocked"
+    "policy_auto_blocked",
   );
 });
 
@@ -1042,13 +1081,25 @@ test("creatives: image_prompt prompts + rationale + creative_qa result are persi
   const store = new FakeImprovementPrStore(ACCOUNT);
   const pipeline = new FakePipelineRunner({
     imagePromptVariants: [
-      { prompt: "hero shot, soft light", negativePrompt: "no text", styleNotes: "studio" },
-      { prompt: "lifestyle outdoor", negativePrompt: "no people in foreground", styleNotes: "natural" },
+      {
+        prompt: "hero shot, soft light",
+        negativePrompt: "no text",
+        styleNotes: "studio",
+      },
+      {
+        prompt: "lifestyle outdoor",
+        negativePrompt: "no people in foreground",
+        styleNotes: "natural",
+      },
     ],
     imagePromptRationale: "audience prefers product-forward visuals",
     creativeQaRecommendation: "approve",
     creativeQaIssues: [
-      { severity: "info", category: "brand_tone", message: "lean studio fits brand voice" },
+      {
+        severity: "info",
+        category: "brand_tone",
+        message: "lean studio fits brand voice",
+      },
     ],
     creativeQaRationale: "all checks pass",
     creativeQaGenes: {
@@ -1131,10 +1182,10 @@ test("creatives: image_prompt prompts + rationale + creative_qa result are persi
   // the persisted creative rows for this run.
   assert.equal(audit.calls.length, 1);
   assert.equal(audit.calls[0]!.action, "improvement_pr.opened");
-  assert.deepEqual(
-    audit.calls[0]!.metadata.creativeIds,
-    ["creative-1", "creative-2"]
-  );
+  assert.deepEqual(audit.calls[0]!.metadata.creativeIds, [
+    "creative-1",
+    "creative-2",
+  ]);
 });
 
 test("creatives: creative generation context is passed to image_prompt and links creatives to the target node", async () => {
@@ -1147,9 +1198,21 @@ test("creatives: creative generation context is passed to image_prompt and links
       displayName: "Weak CPA ad",
       status: "active",
       externalId: "111",
-      current: { spend: 1200, impressions: 1000, clicks: 20, conversions: 0, ctr: 2, cpc: 60, cpa: 0 },
+      current: {
+        spend: 1200,
+        impressions: 1000,
+        clicks: 20,
+        conversions: 0,
+        ctr: 2,
+        cpc: 60,
+        cpa: 0,
+      },
       rationale: "adaptation target: spend with no conversions",
-      creative: { headline: "Old hook", primaryText: "Old body", callToAction: "LEARN_MORE" },
+      creative: {
+        headline: "Old hook",
+        primaryText: "Old body",
+        callToAction: "LEARN_MORE",
+      },
     },
     references: [
       {
@@ -1159,9 +1222,21 @@ test("creatives: creative generation context is passed to image_prompt and links
         displayName: "Winning ad",
         status: "active",
         externalId: "222",
-        current: { spend: 800, impressions: 2000, clicks: 80, conversions: 8, ctr: 4, cpc: 10, cpa: 100 },
+        current: {
+          spend: 800,
+          impressions: 2000,
+          clicks: 80,
+          conversions: 8,
+          ctr: 4,
+          cpc: 10,
+          cpa: 100,
+        },
         rationale: "winner seed: high CTR and conversions",
-        creative: { headline: "Winning hook", primaryText: "Winning body", callToAction: "SIGN_UP" },
+        creative: {
+          headline: "Winning hook",
+          primaryText: "Winning body",
+          callToAction: "SIGN_UP",
+        },
       },
     ],
     brandProfile: { brandName: "Primary Brand", tone: "clear and practical" },
@@ -1188,8 +1263,9 @@ test("creatives: creative generation context is passed to image_prompt and links
   assert.equal(pipeline.imagePromptInputs[0]!.creativeContext, creativeContext);
   assert.equal(store.creativeCalls[0]!.hierarchyId, "hier-ad-weak");
   assert.equal(
-    (audit.calls[0]!.metadata.creativeContext as Record<string, unknown>).strategy,
-    "adapt_winner_to_underperformer"
+    (audit.calls[0]!.metadata.creativeContext as Record<string, unknown>)
+      .strategy,
+    "adapt_winner_to_underperformer",
   );
 });
 
@@ -1198,7 +1274,11 @@ test("creatives: rejected QA still persists creative metadata (audit trail) but 
   const pipeline = new FakePipelineRunner({
     creativeQaRecommendation: "reject",
     creativeQaIssues: [
-      { severity: "error", category: "forbidden_expression", message: "OCR detected SALE 80%" },
+      {
+        severity: "error",
+        category: "forbidden_expression",
+        message: "OCR detected SALE 80%",
+      },
     ],
     creativeQaRationale: "blocking forbidden expression",
   });
@@ -1225,7 +1305,7 @@ test("creatives: rejected QA still persists creative metadata (audit trail) but 
   assert.equal(store.creativeCalls[0]!.qa.issues.length, 1);
   assert.equal(
     store.creativeCalls[0]!.qa.issues[0]!.category,
-    "forbidden_expression"
+    "forbidden_expression",
   );
   assert.deepEqual(summary.creativeIds, ["creative-1"]);
 
@@ -1433,18 +1513,18 @@ test("creatives: prompt-only run (no image-Provider) does NOT link creatives to 
  */
 class FakeCreativeStorage implements CreativeStorageAdapter {
   writes: { key: string; bytes: number }[] = [];
-  constructor(
-    private readonly opts: { throwOnWrite?: string } = {}
-  ) {}
+  constructor(private readonly opts: { throwOnWrite?: string } = {}) {}
   async write(
     key: string,
-    data: string | Uint8Array
+    data: string | Uint8Array,
   ): Promise<{ path: string; bytes: number }> {
     if (this.opts.throwOnWrite) {
       throw new Error(this.opts.throwOnWrite);
     }
     const bytes =
-      typeof data === "string" ? Buffer.byteLength(data, "utf8") : data.byteLength;
+      typeof data === "string"
+        ? Buffer.byteLength(data, "utf8")
+        : data.byteLength;
     this.writes.push({ key, bytes });
     // The caller (`persistCreativeAssets`) does not depend on `path` shape,
     // only that it's a string. We never surface this back to the UI.
@@ -1743,7 +1823,10 @@ test("regression fix: success path persists base storageRef (where metadata.json
   assert.equal(metadataKeys.length, 1);
   const metadataKey = metadataKeys[0]!;
   // metadataKey === `creatives/primary/imgrun_<aiRunId>/metadata.json`
-  const baseKey = metadataKey.slice(0, metadataKey.length - "/metadata.json".length);
+  const baseKey = metadataKey.slice(
+    0,
+    metadataKey.length - "/metadata.json".length,
+  );
   const expectedBaseRef = `storage://${baseKey}`;
 
   // 全 variant が同じ base ref を Creative.storageRef に持つ (= metadata.json の親)。
@@ -1752,28 +1835,28 @@ test("regression fix: success path persists base storageRef (where metadata.json
     assert.equal(
       c.storageRef,
       expectedBaseRef,
-      "Creative.storageRef must be the base directory ref where metadata.json lives"
+      "Creative.storageRef must be the base directory ref where metadata.json lives",
     );
     // storagePath は per-asset の相対 key で残り、base 配下のファイルを 1:1 で指す。
     assert.ok(
       c.storagePath !== null && c.storagePath !== undefined,
-      "Creative.storagePath must be set on the success path"
+      "Creative.storagePath must be set on the success path",
     );
     assert.ok(
       c.storagePath!.startsWith(`${baseKey}/`),
-      `Creative.storagePath (${c.storagePath}) must live under the base key (${baseKey})`
+      `Creative.storagePath (${c.storagePath}) must live under the base key (${baseKey})`,
     );
     assert.match(
       c.storagePath!,
       /\/asset_[a-f0-9]{12}\.(png|jpg)$/,
-      "Creative.storagePath must end with the per-asset filename"
+      "Creative.storagePath must end with the per-asset filename",
     );
   }
   // 2 行は **異なる per-asset** を指す (list ページが variantKey 単位の thumbnail を
   // 引き当てられること = page.tsx の findAssetForCreativeRow 契約)。
   assert.notEqual(
     store.creativeCalls[0]!.storagePath,
-    store.creativeCalls[1]!.storagePath
+    store.creativeCalls[1]!.storagePath,
   );
 });
 
@@ -2005,13 +2088,25 @@ test("attachment: PR diff includes one creative evidence YAML per attached creat
   const store = new FakeImprovementPrStore(ACCOUNT);
   const pipeline = new FakePipelineRunner({
     imagePromptVariants: [
-      { prompt: "hero shot, soft light", negativePrompt: "no text", styleNotes: "studio" },
-      { prompt: "lifestyle outdoor", negativePrompt: "no people in foreground", styleNotes: "natural" },
+      {
+        prompt: "hero shot, soft light",
+        negativePrompt: "no text",
+        styleNotes: "studio",
+      },
+      {
+        prompt: "lifestyle outdoor",
+        negativePrompt: "no people in foreground",
+        styleNotes: "natural",
+      },
     ],
     imagePromptRationale: "audience prefers product-forward visuals",
     creativeQaRecommendation: "approve",
     creativeQaIssues: [
-      { severity: "info", category: "brand_tone", message: "lean studio fits brand voice" },
+      {
+        severity: "info",
+        category: "brand_tone",
+        message: "lean studio fits brand voice",
+      },
     ],
     creativeQaRationale: "all checks pass",
   });
@@ -2033,19 +2128,16 @@ test("attachment: PR diff includes one creative evidence YAML per attached creat
   const sentFiles = publisher.calls[0]!.files;
   assert.equal(sentFiles.length, 3);
   // First file is the original gitops change.
-  assert.equal(
-    sentFiles[0]!.path,
-    "operations/primary/cmp_1.json"
-  );
+  assert.equal(sentFiles[0]!.path, "operations/primary/cmp_1.json");
   // Evidence files land under evidence/creatives/<key>/<creative_id>.yaml.
   assert.equal(
     sentFiles[1]!.path,
-    "evidence/creatives/primary/creative-1.yaml"
+    "evidence/creatives/primary/creative-1.yaml",
   );
   assert.equal(sentFiles[1]!.action, "create");
   assert.equal(
     sentFiles[2]!.path,
-    "evidence/creatives/primary/creative-2.yaml"
+    "evidence/creatives/primary/creative-2.yaml",
   );
   assert.equal(sentFiles[2]!.action, "create");
   // The manifest YAML carries: creative id/key, mediaType, prompt + rationale,
@@ -2062,7 +2154,7 @@ test("attachment: PR diff includes one creative evidence YAML per attached creat
   assert.match(manifest, /\+ {2}text: "hero shot, soft light"/);
   assert.match(
     manifest,
-    /\+ {2}rationale: "audience prefers product-forward visuals"/
+    /\+ {2}rationale: "audience prefers product-forward visuals"/,
   );
   // Provider / model / storageRef are unset at implementation item (image-Provider hop is
   // not wired into the orchestrator yet). They land as YAML `null` so a
@@ -2176,14 +2268,18 @@ test("creatives: placementSet expands one prompt variant into multiple aspect-ra
     [
       "Image variant 1 / フィード (正方形)",
       "Image variant 1 / ストーリーズ/リール",
-    ]
+    ],
   );
   assert.deepEqual(
     store.creativeCalls.map((c) => c.prompt.variantKey),
-    ["concept-a--feed_square", "concept-a--stories_reels"]
+    ["concept-a--feed_square", "concept-a--stories_reels"],
   );
   const params = store.creativeCalls[0]!.parameters as {
-    variationConditions: Array<{ width: number; height: number; variantKey: string }>;
+    variationConditions: Array<{
+      width: number;
+      height: number;
+      variantKey: string;
+    }>;
     variantCount: number;
     placementExpansion: { expandedVariantCount: number; reduced: boolean };
   };
@@ -2193,7 +2289,7 @@ test("creatives: placementSet expands one prompt variant into multiple aspect-ra
     [
       [1080, 1080, "concept-a--feed_square"],
       [1080, 1920, "concept-a--stories_reels"],
-    ]
+    ],
   );
   assert.deepEqual(params.placementExpansion, {
     placementSet: ["feed_square", "stories_reels"],
@@ -2204,6 +2300,150 @@ test("creatives: placementSet expands one prompt variant into multiple aspect-ra
     reduced: false,
   });
   assert.equal(store.creativeLinkCalls[0]!.creativeIds.length, 2);
+});
+
+test("creatives: carousel format persists one creative row with multiple card assets and PR evidence", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  const pipeline = new FakePipelineRunner({
+    copyCarousel: {
+      storyArc: "Hook, feature, CTA",
+      cards: [
+        {
+          position: 1,
+          role: "hook",
+          headline: "課題を見つける",
+          description: "運用のムダを可視化",
+          imageBrief: "operator reviewing wasted spend",
+        },
+        {
+          position: 2,
+          role: "cta",
+          headline: "改善案を見る",
+          description: null,
+          imageBrief: "clear product screen with CTA",
+        },
+      ],
+    },
+    imagePromptVariants: [
+      {
+        variantKey: "card-1",
+        prompt: "card 1 visual",
+        negativePrompt: "no logos",
+        styleNotes: "shared visual system",
+      },
+      {
+        variantKey: "card-2",
+        prompt: "card 2 visual",
+        negativePrompt: "no logos",
+        styleNotes: "shared visual system",
+      },
+    ],
+    creativeQaRecommendation: "approve",
+  });
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+  const creativeStorage = new FakeCreativeStorage();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    imageProvider: new MockImageProvider(),
+    creativeStorage,
+    creativeFormat: "carousel",
+    carouselCardCount: 2,
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(store.creativeCalls.length, 1);
+  const creative = store.creativeCalls[0]!;
+  assert.equal(creative.mediaType, "carousel");
+  assert.equal(creative.status, "qa_passed");
+  assert.equal(creative.carouselSpec?.cards.length, 2);
+  assert.deepEqual(
+    creative.carouselSpec?.cards.map((card) => card.assetVariantKey),
+    ["card-1", "card-2"],
+  );
+  assert.equal(creative.storageRef, "storage://creatives/primary/imgrun_run-4");
+  assert.equal(creative.provider, "mock");
+  assert.equal(pipeline.copyInputs[0]!.creativeFormat, "carousel");
+  assert.equal(pipeline.copyInputs[0]!.carouselCardCount, 2);
+  assert.equal(pipeline.imagePromptInputs[0]!.carousel?.cards.length, 2);
+  assert.equal(publisher.calls[0]!.files.length, 2);
+  const manifest = publisher.calls[0]!.files[1]!.diff;
+  assert.match(manifest, /\+ {2}mediaType: "carousel"/);
+  assert.match(manifest, /\+carousel:/);
+  assert.match(manifest, /\+ {6}assetVariantKey: "card-1"/);
+  assert.match(manifest, /\+ {4}- variantKey: "card-1"/);
+  assert.match(publisher.calls[0]!.prBody, /media type: `carousel`/);
+  assert.match(publisher.calls[0]!.prBody, /cards:/);
+  assert.deepEqual(store.creativeLinkCalls[0]!.creativeIds, ["creative-1"]);
+});
+
+test("creatives: carousel card and asset mismatch is persisted as qa_failed and not attached", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  const pipeline = new FakePipelineRunner({
+    copyCarousel: {
+      storyArc: "Two cards, one missing asset",
+      cards: [
+        {
+          position: 1,
+          role: "hook",
+          headline: "最初のカード",
+          description: null,
+          imageBrief: "first",
+        },
+        {
+          position: 2,
+          role: "cta",
+          headline: "最後のカード",
+          description: null,
+          imageBrief: "second",
+        },
+      ],
+    },
+    imagePromptVariants: [
+      {
+        variantKey: "card-1",
+        prompt: "only card 1",
+        negativePrompt: "no logos",
+        styleNotes: "shared visual system",
+      },
+    ],
+    creativeQaRecommendation: "approve",
+  });
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    imageProvider: new MockImageProvider(),
+    creativeStorage: new FakeCreativeStorage(),
+    creativeFormat: "carousel",
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal(store.creativeCalls.length, 1);
+  assert.equal(store.creativeCalls[0]!.mediaType, "carousel");
+  assert.equal(store.creativeCalls[0]!.status, "qa_failed");
+  assert.equal(store.creativeCalls[0]!.qa.recommendation, "reject");
+  assert.match(store.creativeCalls[0]!.qa.rationale, /Carousel spec failed/);
+  assert.equal(publisher.calls[0]!.files.length, 1);
+  assert.equal(store.creativeLinkCalls.length, 0);
 });
 
 test("creatives: placementSet caps expanded generation at twelve assets", async () => {
@@ -2233,18 +2473,32 @@ test("creatives: placementSet caps expanded generation at twelve assets", async 
     audit,
     imageProvider: new MockImageProvider(),
     creativeStorage,
-    placementSet: ["feed_square", "feed_vertical", "stories_reels", "link_landscape"],
+    placementSet: [
+      "feed_square",
+      "feed_vertical",
+      "stories_reels",
+      "link_landscape",
+    ],
   });
 
   assert.equal(summary.status, "succeeded");
   assert.equal(store.creativeCalls.length, 12);
   const params = store.creativeCalls[0]!.parameters as {
     variantCount: number;
-    placementExpansion: { originalVariantCount: number; usedVariantCount: number; reduced: boolean };
+    placementExpansion: {
+      originalVariantCount: number;
+      usedVariantCount: number;
+      reduced: boolean;
+    };
   };
   assert.equal(params.variantCount, 12);
   assert.deepEqual(params.placementExpansion, {
-    placementSet: ["feed_square", "feed_vertical", "stories_reels", "link_landscape"],
+    placementSet: [
+      "feed_square",
+      "feed_vertical",
+      "stories_reels",
+      "link_landscape",
+    ],
     originalVariantCount: 6,
     usedVariantCount: 3,
     expandedVariantCount: 12,
@@ -2253,8 +2507,8 @@ test("creatives: placementSet caps expanded generation at twelve assets", async 
   });
   assert.ok(
     store.creativeCalls.every((c) =>
-      String(c.prompt.variantKey).startsWith("concept-")
-    )
+      String(c.prompt.variantKey).startsWith("concept-"),
+    ),
   );
 });
 
@@ -2262,13 +2516,25 @@ test("attachment: PR body includes 生成クリエイティブ section with rati
   const store = new FakeImprovementPrStore(ACCOUNT);
   const pipeline = new FakePipelineRunner({
     imagePromptVariants: [
-      { prompt: "hero shot of the product on white", negativePrompt: "no text", styleNotes: "studio" },
+      {
+        prompt: "hero shot of the product on white",
+        negativePrompt: "no text",
+        styleNotes: "studio",
+      },
     ],
     imagePromptRationale: "highlight product hero with high contrast",
     creativeQaRecommendation: "approve",
     creativeQaIssues: [
-      { severity: "info", category: "dimensions", message: "1080x1080 fits Meta feed placement" },
-      { severity: "warn", category: "quality", message: "file size 1.2 MB > recommended 1.0 MB" },
+      {
+        severity: "info",
+        category: "dimensions",
+        message: "1080x1080 fits Meta feed placement",
+      },
+      {
+        severity: "warn",
+        category: "quality",
+        message: "file size 1.2 MB > recommended 1.0 MB",
+      },
     ],
     creativeQaRationale: "passes blocking checks; non-blocking warn on quality",
   });
@@ -2298,13 +2564,19 @@ test("attachment: PR body includes 生成クリエイティブ section with rati
   // per-check breakdown, preview ref, and per-creative risk classification.
   assert.match(body, /creative: `creative-1`/);
   assert.match(body, /status: `qa_passed`/);
-  assert.match(body, /生成理由 \(rationale\): highlight product hero with high contrast/);
-  assert.match(body, /prompt: hero shot of the product on white/);
-  assert.match(body, /QA 結果: `approve`/);
-  assert.match(body, /\[info\] `dimensions`: 1080x1080 fits Meta feed placement/);
   assert.match(
     body,
-    /\[warn\] `quality`: file size 1\.2 MB > recommended 1\.0 MB/
+    /生成理由 \(rationale\): highlight product hero with high contrast/,
+  );
+  assert.match(body, /prompt: hero shot of the product on white/);
+  assert.match(body, /QA 結果: `approve`/);
+  assert.match(
+    body,
+    /\[info\] `dimensions`: 1080x1080 fits Meta feed placement/,
+  );
+  assert.match(
+    body,
+    /\[warn\] `quality`: file size 1\.2 MB > recommended 1\.0 MB/,
   );
   // No image binary yet → preview is the explicit prompt-only marker, not a
   // fabricated URL or filesystem path (UI design plan principle 24).
@@ -2330,9 +2602,7 @@ test("attachment: PR body includes preview = storage ref when image binary is pe
   // today). This locks in the contract that prompt-only is the default and
   // future hops are responsible for populating storage metadata.
   const pipeline = new FakePipelineRunner({
-    imagePromptVariants: [
-      { prompt: "p1", negativePrompt: "", styleNotes: "" },
-    ],
+    imagePromptVariants: [{ prompt: "p1", negativePrompt: "", styleNotes: "" }],
     creativeQaRecommendation: "approve",
   });
   const publisher = new FakePublisher();
@@ -2414,10 +2684,9 @@ test("attachment: PR publish failure audit metadata records attached creative id
   assert.equal(audit.calls.length, 1);
   assert.equal(audit.calls[0]!.action, "improvement_pr.failed");
   assert.equal(audit.calls[0]!.metadata.attachedCreativeFileCount, 1);
-  assert.deepEqual(
-    audit.calls[0]!.metadata.attachedCreativeIds,
-    ["creative-1"]
-  );
+  assert.deepEqual(audit.calls[0]!.metadata.attachedCreativeIds, [
+    "creative-1",
+  ]);
 });
 
 test("attachment: gitops 'skip' produces no manifest files and no PR (creative metadata remains in DB only)", async () => {

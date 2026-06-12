@@ -179,6 +179,14 @@ export {
 } from "./placements.js";
 
 export {
+  parseCarouselCreativeSpec,
+  validateCarouselCreativeSpec,
+  type CarouselCardRole,
+  type CarouselCreativeSpec,
+  type CarouselCreativeSpecValidation,
+} from "./carousel-spec.js";
+
+export {
   CreativeStorageInvalidIdError,
   CreativeStorageQaIncompleteError,
   persistCreativeAssets,
@@ -265,6 +273,7 @@ export {
   type AuditAgentInput,
   type AuditAgentOutput,
   type CopyAgentDecision,
+  type CarouselCardPlan,
   type CopyAgentInput,
   type CopyAgentOutput,
   type CopyAgentVariant,

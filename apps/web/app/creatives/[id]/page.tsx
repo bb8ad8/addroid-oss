@@ -53,7 +53,10 @@ import {
   type CreativeMetadataQaAsset,
   type CreativeMetadataQaCheck,
 } from "../../../lib/creative-helpers";
-import { ensureWebWorkspace, sanitizeForDisplay } from "../../../lib/meta-runtime";
+import {
+  ensureWebWorkspace,
+  sanitizeForDisplay,
+} from "../../../lib/meta-runtime";
 import { getPaginationState, paginationLabel } from "../../../lib/pagination";
 import { DashboardChatPanel } from "../../DashboardChatPanel";
 
@@ -104,7 +107,12 @@ export default async function CreativeDetailPage({
         createdAt: true,
         updatedAt: true,
         account: {
-          select: { id: true, key: true, displayName: true, metaAccountId: true },
+          select: {
+            id: true,
+            key: true,
+            displayName: true,
+            metaAccountId: true,
+          },
         },
         hierarchy: {
           select: {
@@ -199,7 +207,7 @@ export default async function CreativeDetailPage({
     const auditPagination = getPaginationState(
       resolvedSearchParams,
       "auditPage",
-      auditTotal
+      auditTotal,
     );
     auditRows = await prisma.auditLog.findMany({
       where: auditWhere,
@@ -221,7 +229,8 @@ export default async function CreativeDetailPage({
   }
 
   const spec = parseCreativeSpec(row.spec);
-  const genes = parseCreativeGenes(row.genes) ?? spec.genes ?? metadata?.genes ?? null;
+  const genes =
+    parseCreativeGenes(row.genes) ?? spec.genes ?? metadata?.genes ?? null;
   const params2 = parseCreativeParameters(row.parameters);
   const statusState = creativeStatusToState(row.status);
   const overallQa = metadata?.qa.overall ?? null;
@@ -230,18 +239,26 @@ export default async function CreativeDetailPage({
   const auditPagination = getPaginationState(
     resolvedSearchParams,
     "auditPage",
-    auditTotal
+    auditTotal,
   );
 
   const overviewItems: KeyValueEntry[] = [
-    { label: "Creative ID", value: <InlineCode>{row.id}</InlineCode>, mono: true },
+    {
+      label: "Creative ID",
+      value: <InlineCode>{row.id}</InlineCode>,
+      mono: true,
+    },
     { label: "Key", value: <InlineCode>{row.key}</InlineCode>, mono: true },
     { label: "Display name", value: <span>{row.displayName}</span> },
     {
       label: "Status",
       value: <StatusBadge state={statusState}>{row.status}</StatusBadge>,
     },
-    { label: "Media type", value: <InlineCode>{row.mediaType}</InlineCode>, mono: true },
+    {
+      label: "Media type",
+      value: <InlineCode>{row.mediaType}</InlineCode>,
+      mono: true,
+    },
     {
       label: "Account",
       value: row.account ? (
@@ -264,7 +281,8 @@ export default async function CreativeDetailPage({
       label: "Hierarchy node",
       value: row.hierarchy ? (
         <span>
-          <InlineCode>{row.hierarchy.nodeType}</InlineCode> · {row.hierarchy.displayName}
+          <InlineCode>{row.hierarchy.nodeType}</InlineCode> ·{" "}
+          {row.hierarchy.displayName}
           {row.hierarchy.externalId ? (
             <>
               {" "}
@@ -303,7 +321,10 @@ export default async function CreativeDetailPage({
     {
       label: "Created",
       value: (
-        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+        <span
+          className="tabular-nums"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {formatTimestamp(row.createdAt)}
         </span>
       ),
@@ -311,7 +332,10 @@ export default async function CreativeDetailPage({
     {
       label: "Updated",
       value: (
-        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+        <span
+          className="tabular-nums"
+          style={{ fontFamily: "var(--font-mono)" }}
+        >
           {formatTimestamp(row.updatedAt)}
         </span>
       ),
@@ -333,15 +357,15 @@ export default async function CreativeDetailPage({
       <PageHeader
         title={
           <span>
-            Creative · <span style={{ fontFamily: "var(--font-mono)" }}>{row.id.slice(0, 12)}…</span>
+            Creative ·{" "}
+            <span style={{ fontFamily: "var(--font-mono)" }}>
+              {row.id.slice(0, 12)}…
+            </span>
           </span>
         }
         subtitle={
           <>
-            <Link
-              href="/creatives"
-              style={{ color: "var(--color-accent)" }}
-            >
+            <Link href="/creatives" style={{ color: "var(--color-accent)" }}>
               ← 一覧に戻る
             </Link>
             {"  ·  "}
@@ -384,7 +408,9 @@ export default async function CreativeDetailPage({
           {!hasStorage && spec.adText ? (
             <div className="creative-detail__previews">
               <CreativeAdPreview
-                accountName={row.account?.displayName || row.account?.key || "AdDroid"}
+                accountName={
+                  row.account?.displayName || row.account?.key || "AdDroid"
+                }
                 displayName={row.displayName}
                 adText={spec.adText}
                 imageAlt={`creative ${row.displayName}`}
@@ -416,7 +442,9 @@ export default async function CreativeDetailPage({
           ) : !storageReachable && spec.adText ? (
             <div className="creative-detail__previews">
               <CreativeAdPreview
-                accountName={row.account?.displayName || row.account?.key || "AdDroid"}
+                accountName={
+                  row.account?.displayName || row.account?.key || "AdDroid"
+                }
                 displayName={row.displayName}
                 adText={spec.adText}
                 imageAlt={`creative ${row.displayName}`}
@@ -439,17 +467,73 @@ export default async function CreativeDetailPage({
               title="storage 上に metadata.json が見つかりません"
               description={
                 <>
-                  storage ref:{" "}
-                  <InlineCode>{row.storageRef ?? ""}</InlineCode>
-                  。Storage Adapter (LocalDisk) から metadata.json を読み出せません。
-                  生成バイナリが削除された / 別ホストで生成された可能性があります。
+                  storage ref: <InlineCode>{row.storageRef ?? ""}</InlineCode>
+                  。Storage Adapter (LocalDisk) から metadata.json
+                  を読み出せません。 生成バイナリが削除された /
+                  別ホストで生成された可能性があります。
                 </>
               }
             />
+          ) : spec.carousel ? (
+            <div className="creative-detail__carousel-strip">
+              {spec.carousel.cards.map((card) => {
+                const asset =
+                  metadata!.assets.find(
+                    (a) => a.variantKey === card.assetVariantKey,
+                  ) ?? null;
+                return (
+                  <section
+                    className="creative-detail__carousel-card"
+                    key={card.position}
+                  >
+                    <div className="creative-detail__variant-group-header">
+                      <InlineCode>card-{card.position}</InlineCode>
+                      <StatusBadge
+                        state={
+                          asset ? qaOverallToState(asset.qaOverall) : "warn"
+                        }
+                      >
+                        {card.role}
+                      </StatusBadge>
+                    </div>
+                    <CreativeAdPreview
+                      accountName={
+                        row.account?.displayName ||
+                        row.account?.key ||
+                        "AdDroid"
+                      }
+                      displayName={row.displayName}
+                      adText={carouselAdTextForCard(spec.adText, card)}
+                      imageSrc={
+                        asset
+                          ? `/api/creatives/${row.id}/asset/${asset.assetId}`
+                          : undefined
+                      }
+                      imageAlt={`creative ${row.displayName} carousel card ${card.position}`}
+                      imageStatusLabel="画像未取得"
+                      selected
+                      caption={
+                        asset ? (
+                          <CreativeAssetCaption asset={asset} />
+                        ) : (
+                          <div className="creative-detail__preview-caption">
+                            <StatusBadge state="warn">asset 未保存</StatusBadge>
+                            <InlineCode>{card.assetVariantKey}</InlineCode>
+                          </div>
+                        )
+                      }
+                    />
+                  </section>
+                );
+              })}
+            </div>
           ) : (
             <div className="creative-detail__previews">
               {groupAssetsByBaseVariant(metadata!.assets).map((group) => (
-                <section className="creative-detail__variant-group" key={group.baseVariantKey}>
+                <section
+                  className="creative-detail__variant-group"
+                  key={group.baseVariantKey}
+                >
                   <div className="creative-detail__variant-group-header">
                     <InlineCode>{group.baseVariantKey}</InlineCode>
                     <span>{group.assets.length} size</span>
@@ -458,9 +542,17 @@ export default async function CreativeDetailPage({
                     {group.assets.map(({ asset, assetIndex }) => (
                       <CreativeAdPreview
                         key={asset.assetId}
-                        accountName={row.account?.displayName || row.account?.key || "AdDroid"}
+                        accountName={
+                          row.account?.displayName ||
+                          row.account?.key ||
+                          "AdDroid"
+                        }
                         displayName={row.displayName}
-                        adText={textForPreview(spec.adText, spec.textVariants, assetIndex)}
+                        adText={textForPreview(
+                          spec.adText,
+                          spec.textVariants,
+                          assetIndex,
+                        )}
                         imageSrc={`/api/creatives/${row.id}/asset/${asset.assetId}`}
                         imageAlt={`creative ${row.displayName} variant ${asset.variantKey}`}
                         selected
@@ -491,7 +583,11 @@ export default async function CreativeDetailPage({
                   {row.pullRequest.htmlUrl ? (
                     <>
                       {" "}
-                      <a href={row.pullRequest.htmlUrl} target="_blank" rel="noreferrer">
+                      <a
+                        href={row.pullRequest.htmlUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
                         GitHubで確認
                       </a>
                     </>
@@ -521,15 +617,27 @@ export default async function CreativeDetailPage({
                   `status=${row.status}`,
                   `mediaType=${row.mediaType}`,
                   row.storagePath ? "hasMedia=true" : "hasMedia=false",
-                  row.pullRequest ? `previousSubmissionPr=${row.pullRequest.number}` : "previousSubmissionPr=false",
-                  spec.adText?.headline ? `headline=${spec.adText.headline}` : null,
-                  spec.adText?.primaryText ? `primaryText=${spec.adText.primaryText}` : null,
-                  spec.adText?.description ? `description=${spec.adText.description}` : null,
-                  spec.adText?.callToAction ? `callToAction=${spec.adText.callToAction}` : null,
+                  row.pullRequest
+                    ? `previousSubmissionPr=${row.pullRequest.number}`
+                    : "previousSubmissionPr=false",
+                  spec.adText?.headline
+                    ? `headline=${spec.adText.headline}`
+                    : null,
+                  spec.adText?.primaryText
+                    ? `primaryText=${spec.adText.primaryText}`
+                    : null,
+                  spec.adText?.description
+                    ? `description=${spec.adText.description}`
+                    : null,
+                  spec.adText?.callToAction
+                    ? `callToAction=${spec.adText.callToAction}`
+                    : null,
                   "このCreativeが過去の入稿PRに紐づいていても、別キャンペーンや2回目の入稿として再度PR化できます。",
                   "不足している placement、campaignId/adsetId、campaignName/adsetName、objective、予算、pageId、optimizationGoal、billingEvent、linkUrl、国ターゲティングはツール実行前に短く質問してください。",
                   "Meta へ直接変更せず、必ず GitOps PR と dry-run の経路を使ってください。",
-                ].filter(Boolean).join("\n")}
+                ]
+                  .filter(Boolean)
+                  .join("\n")}
               />
             </div>
           )}
@@ -569,7 +677,7 @@ export default async function CreativeDetailPage({
           {spec.prompt || row.prompt || metadata?.prompt ? (
             <CodeBlock>
               {sanitizeForDisplay(
-                spec.prompt ?? row.prompt ?? metadata?.prompt ?? ""
+                spec.prompt ?? row.prompt ?? metadata?.prompt ?? "",
               )}
             </CodeBlock>
           ) : (
@@ -631,10 +739,7 @@ export default async function CreativeDetailPage({
           ) : null}
         </Panel>
 
-        <Panel
-          title="Ad text"
-          subtitle="Meta広告の本文 / 見出し / 説明 / CTA"
-        >
+        <Panel title="Ad text" subtitle="Meta広告の本文 / 見出し / 説明 / CTA">
           {spec.adText ? (
             <div style={{ display: "grid", gap: "1rem" }}>
               <KeyValueList
@@ -697,7 +802,9 @@ export default async function CreativeDetailPage({
                     {spec.textVariants.slice(0, 4).map((variant, i) => (
                       <li key={i} style={{ marginBottom: "0.5rem" }}>
                         <InlineCode>variant-{i}</InlineCode>{" "}
-                        {variant.headline ? <strong>{variant.headline}</strong> : null}
+                        {variant.headline ? (
+                          <strong>{variant.headline}</strong>
+                        ) : null}
                         {variant.primaryText ? (
                           <span> — {variant.primaryText}</span>
                         ) : null}
@@ -734,7 +841,8 @@ export default async function CreativeDetailPage({
                   label: "Variant count",
                   value: (
                     <span className="tabular-nums">
-                      {metadata?.variantCount ?? params2.variationConditions.length}
+                      {metadata?.variantCount ??
+                        params2.variationConditions.length}
                     </span>
                   ),
                 },
@@ -748,7 +856,7 @@ export default async function CreativeDetailPage({
                         {params2.variationConditions.map((c, i) => {
                           const dims = formatDimensions(
                             c.width ?? 0,
-                            c.height ?? 0
+                            c.height ?? 0,
                           );
                           const fmt = c.format ?? "png";
                           const label = c.variantKey ?? `variant-${i + 1}`;
@@ -841,7 +949,7 @@ export default async function CreativeDetailPage({
               {metadata
                 ? metadata.qa.overall
                 : spec.qa
-                  ? spec.qa.recommendation ?? "summary"
+                  ? (spec.qa.recommendation ?? "summary")
                   : "no qa"}
             </StatusDot>
           }
@@ -853,7 +961,9 @@ export default async function CreativeDetailPage({
                   {
                     label: "Overall",
                     value: (
-                      <StatusBadge state={qaOverallToState(metadata.qa.overall)}>
+                      <StatusBadge
+                        state={qaOverallToState(metadata.qa.overall)}
+                      >
                         {metadata.qa.overall}
                       </StatusBadge>
                     ),
@@ -982,7 +1092,9 @@ export default async function CreativeDetailPage({
                 value: row.creativeQa ? (
                   <span>
                     <InlineCode>{row.creativeQa.id}</InlineCode>{" "}
-                    <StatusBadge state="info">{row.creativeQa.agent}</StatusBadge>{" "}
+                    <StatusBadge state="info">
+                      {row.creativeQa.agent}
+                    </StatusBadge>{" "}
                     <InlineCode>
                       {row.creativeQa.provider}/{row.creativeQa.model}
                     </InlineCode>{" "}
@@ -1123,14 +1235,21 @@ function CreativeAdPreview({
   caption?: ReactNode;
 }) {
   const headline = adText?.headline || displayName;
-  const primaryText = adText?.primaryText || "広告テキスト案は詳細画面で確認できます。";
+  const primaryText =
+    adText?.primaryText || "広告テキスト案は詳細画面で確認できます。";
   const description = adText?.description || "詳しくはこちら";
   const cta = adText?.callToAction || "LEARN_MORE";
   return (
     <figure className="creative-detail__preview">
-      <div className="creative-card__ad-preview creative-detail__ad-preview" aria-label="Meta広告プレビュー">
+      <div
+        className="creative-card__ad-preview creative-detail__ad-preview"
+        aria-label="Meta広告プレビュー"
+      >
         {selected ? (
-          <label className="creative-card__select creative-card__select--detail" title="入稿候補として選択中">
+          <label
+            className="creative-card__select creative-card__select--detail"
+            title="入稿候補として選択中"
+          >
             <input type="checkbox" checked readOnly />
             <span>入稿候補</span>
           </label>
@@ -1194,14 +1313,30 @@ function CreativeAssetCaption({ asset }: { asset: CreativeMetadataAsset }) {
       </div>
       <div className="mono">
         <InlineCode>{asset.mimeType}</InlineCode> ·{" "}
-        <InlineCode>{formatDimensions(asset.width, asset.height)}</InlineCode>{" "}
-        · {formatBytes(asset.byteSize)}
+        <InlineCode>{formatDimensions(asset.width, asset.height)}</InlineCode> ·{" "}
+        {formatBytes(asset.byteSize)}
       </div>
       <div className="mono" style={{ wordBreak: "break-all" }}>
         <InlineCode>{asset.storageRef}</InlineCode>
       </div>
     </div>
   );
+}
+
+function carouselAdTextForCard(
+  base: CreativeSpecAdText | null,
+  card: {
+    headline: string;
+    description: string | null;
+  },
+): CreativeSpecAdText {
+  return {
+    primaryText: base?.primaryText ?? null,
+    headline: card.headline,
+    description: card.description ?? base?.description ?? null,
+    callToAction: base?.callToAction ?? "LEARN_MORE",
+    rationale: base?.rationale ?? null,
+  };
 }
 
 function groupAssetsByBaseVariant(assets: CreativeMetadataAsset[]): Array<{
@@ -1231,7 +1366,7 @@ function groupAssetsByBaseVariant(assets: CreativeMetadataAsset[]): Array<{
 function textForPreview(
   primary: CreativeSpecAdText | null,
   variants: CreativeSpecAdText[],
-  index: number
+  index: number,
 ): CreativeSpecAdText | null {
   return variants[index] ?? primary;
 }
@@ -1290,7 +1425,11 @@ const auditColumns: DataTableColumn<{
   {
     header: "Ref",
     cell: (r) =>
-      r.ref ? <InlineCode>{sanitizeForDisplay(r.ref)}</InlineCode> : <span>—</span>,
+      r.ref ? (
+        <InlineCode>{sanitizeForDisplay(r.ref)}</InlineCode>
+      ) : (
+        <span>—</span>
+      ),
   },
 ];
 
@@ -1322,7 +1461,12 @@ function QaAssetBlock({ asset }: { asset: CreativeMetadataQaAsset }) {
           {asset.overall}
         </StatusBadge>
         <InlineCode>variantKey={asset.variantKey}</InlineCode>
-        <span style={{ color: "var(--color-text-secondary)", fontSize: "0.8125rem" }}>
+        <span
+          style={{
+            color: "var(--color-text-secondary)",
+            fontSize: "0.8125rem",
+          }}
+        >
           {asset.checks.length} check{asset.checks.length === 1 ? "" : "s"}
         </span>
       </summary>
@@ -1362,25 +1506,45 @@ function creativeGeneItems(genes: CreativeGenes): KeyValueEntry[] {
         </div>
       ),
     },
-    { label: "トーン", value: <span>{GENE_LABELS_JA[genes.tone] ?? genes.tone}</span> },
+    {
+      label: "トーン",
+      value: <span>{GENE_LABELS_JA[genes.tone] ?? genes.tone}</span>,
+    },
     {
       label: "被写体",
-      value: <span>{GENE_LABELS_JA[genes.subjectType] ?? genes.subjectType}</span>,
+      value: (
+        <span>{GENE_LABELS_JA[genes.subjectType] ?? genes.subjectType}</span>
+      ),
     },
     {
       label: "配色",
-      value: <span>{GENE_LABELS_JA[genes.colorScheme] ?? genes.colorScheme}</span>,
+      value: (
+        <span>{GENE_LABELS_JA[genes.colorScheme] ?? genes.colorScheme}</span>
+      ),
     },
-    { label: "構図", value: <span>{GENE_LABELS_JA[genes.layout] ?? genes.layout}</span> },
-    { label: "文字入り", value: <span>{genes.hasTextOverlay ? "あり" : "なし"}</span> },
+    {
+      label: "構図",
+      value: <span>{GENE_LABELS_JA[genes.layout] ?? genes.layout}</span>,
+    },
+    {
+      label: "文字入り",
+      value: <span>{genes.hasTextOverlay ? "あり" : "なし"}</span>,
+    },
     { label: "CTA", value: <span>{genes.hasCta ? "あり" : "なし"}</span> },
-    { label: "言語", value: <span>{GENE_LABELS_JA[genes.language] ?? genes.language}</span> },
+    {
+      label: "言語",
+      value: <span>{GENE_LABELS_JA[genes.language] ?? genes.language}</span>,
+    },
   ];
 }
 
 function QaCheckRow({ check }: { check: CreativeMetadataQaCheck }) {
   return (
-    <tr data-testid="qa-check" data-kind={check.kind} data-outcome={check.outcome}>
+    <tr
+      data-testid="qa-check"
+      data-kind={check.kind}
+      data-outcome={check.outcome}
+    >
       <td className="mono">
         <InlineCode>{check.kind}</InlineCode>
       </td>

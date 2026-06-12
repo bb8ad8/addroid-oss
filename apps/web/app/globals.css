@@ -2057,6 +2057,19 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 0.75rem;
 }
+.creative-detail__carousel-strip {
+  display: flex;
+  gap: 0.875rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scroll-snap-type: x proximity;
+}
+.creative-detail__carousel-card {
+  flex: 0 0 min(320px, 86vw);
+  display: grid;
+  gap: 0.625rem;
+  scroll-snap-align: start;
+}
 .creative-detail__preview {
   margin: 0;
   display: grid;

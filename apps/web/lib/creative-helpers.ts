@@ -15,7 +15,9 @@
 import path from "node:path";
 import { LocalDiskStorage } from "@addroid/config";
 import {
+  parseCarouselCreativeSpec,
   parseCreativeGenes,
+  type CarouselCreativeSpec,
   type CreativeGenes,
 } from "@addroid/llm-provider";
 import type { StatusState } from "../components/ui/StatusDot";
@@ -153,6 +155,7 @@ export interface CreativeSpec {
   metaTextRecommendations: CreativeSpecTextRecommendations | null;
   qa: CreativeSpecQa | null;
   genes: CreativeGenes | null;
+  carousel: CarouselCreativeSpec | null;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -183,13 +186,11 @@ export function parseCreativeSpec(spec: unknown): CreativeSpec {
   let qa: CreativeSpecQa | null = null;
   if (isRecord(r.qa)) {
     const issues = Array.isArray(r.qa.issues)
-      ? r.qa.issues
-          .filter(isRecord)
-          .map((i) => ({
-            severity: readStr(i.severity) ?? "",
-            category: readStr(i.category) ?? "",
-            message: readStr(i.message) ?? "",
-          }))
+      ? r.qa.issues.filter(isRecord).map((i) => ({
+          severity: readStr(i.severity) ?? "",
+          category: readStr(i.category) ?? "",
+          message: readStr(i.message) ?? "",
+        }))
       : [];
     qa = {
       aiRunId: readStr(r.qa.aiRunId),
@@ -200,7 +201,10 @@ export function parseCreativeSpec(spec: unknown): CreativeSpec {
   }
   const adText =
     parseAdText(r.adText) ??
-    (readStr(r.primaryText) || readStr(r.headline) || readStr(r.description) || readStr(r.callToAction)
+    (readStr(r.primaryText) ||
+    readStr(r.headline) ||
+    readStr(r.description) ||
+    readStr(r.callToAction)
       ? {
           primaryText: readStr(r.primaryText),
           headline: readStr(r.headline),
@@ -210,7 +214,9 @@ export function parseCreativeSpec(spec: unknown): CreativeSpec {
         }
       : null);
   const textVariants = Array.isArray(r.textVariants)
-    ? r.textVariants.map(parseAdText).filter((v): v is CreativeSpecAdText => v !== null)
+    ? r.textVariants
+        .map(parseAdText)
+        .filter((v): v is CreativeSpecAdText => v !== null)
     : [];
   const recommendations = isRecord(r.metaTextRecommendations)
     ? {
@@ -230,6 +236,7 @@ export function parseCreativeSpec(spec: unknown): CreativeSpec {
     metaTextRecommendations: recommendations,
     qa,
     genes: parseCreativeGenes(r.genes),
+    carousel: parseCarouselCreativeSpec(r.carousel),
   };
 }
 
@@ -256,7 +263,9 @@ export interface CreativeParameters {
   variationConditions: CreativeVariationCondition[];
 }
 
-export function parseCreativeParameters(parameters: unknown): CreativeParameters {
+export function parseCreativeParameters(
+  parameters: unknown,
+): CreativeParameters {
   const r = isRecord(parameters) ? parameters : {};
   const conditions = Array.isArray(r.variationConditions)
     ? r.variationConditions.filter(isRecord).map((c) => ({
@@ -371,13 +380,15 @@ function asQaOutcome(v: unknown): CreativeQaOutcome {
 }
 
 function asQaSeverity(v: unknown): CreativeQaSeverity {
-  return typeof v === "string" && VALID_QA_SEVERITIES.has(v as CreativeQaSeverity)
+  return typeof v === "string" &&
+    VALID_QA_SEVERITIES.has(v as CreativeQaSeverity)
     ? (v as CreativeQaSeverity)
     : "info_only";
 }
 
 function asQaCheckKind(v: unknown): CreativeQaCheckKind | null {
-  return typeof v === "string" && VALID_QA_CHECK_KINDS.has(v as CreativeQaCheckKind)
+  return typeof v === "string" &&
+    VALID_QA_CHECK_KINDS.has(v as CreativeQaCheckKind)
     ? (v as CreativeQaCheckKind)
     : null;
 }
@@ -389,7 +400,7 @@ function asQaOverall(v: unknown): CreativeQaOverall {
 }
 
 export function parseCreativeMetadata(
-  raw: unknown
+  raw: unknown,
 ): CreativeMetadataDocument | null {
   if (!isRecord(raw)) return null;
   const assetsArr = Array.isArray(raw.assets) ? raw.assets : [];
@@ -506,7 +517,7 @@ export function storageRefToKey(ref: string): string | null {
  * (たまたま) per-asset ref を渡しても 410 ループに陥らない。
  */
 export async function readCreativeMetadataByRef(
-  baseStorageRef: string
+  baseStorageRef: string,
 ): Promise<CreativeMetadataDocument | null> {
   const baseKey = storageRefToKey(baseStorageRef);
   if (!baseKey) return null;
@@ -562,7 +573,7 @@ export interface ResolvedCreativeAsset {
  */
 export function findAssetForCreativeRow(
   metadata: CreativeMetadataDocument,
-  row: { storagePath: string | null }
+  row: { storagePath: string | null },
 ): CreativeMetadataAsset | null {
   if (!row.storagePath) return null;
   const filename = path.posix.basename(row.storagePath);
@@ -572,7 +583,7 @@ export function findAssetForCreativeRow(
 
 export async function readCreativeAssetByMetadata(
   metadata: CreativeMetadataDocument,
-  assetId: string
+  assetId: string,
 ): Promise<ResolvedCreativeAsset | null> {
   if (typeof assetId !== "string" || !/^asset_[a-f0-9]{12}$/.test(assetId)) {
     return null;

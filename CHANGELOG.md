@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — カルーセル生成 (Phase 1)
+
+- `creativeFormat=carousel` 指定時に copy / image_prompt agent がカード別画像を生成し、複数 asset を 1 つの carousel creative として QA・PR 証跡・`/creatives` UI に保存表示できる Phase 1 経路を追加。
+
 ### Added — 配置別アスペクト比の自動展開
 
 - `placementSet` 指定時に 1 つの image_prompt 案を Feed/Stories/Reels/リンク広告向け複数アスペクト比へ決定論的に展開し、生成数上限と詳細画面の variant グループ表示を追加。

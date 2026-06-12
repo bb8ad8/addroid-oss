@@ -108,12 +108,19 @@ export default async function CreativesPage({
   searchParams?: Promise<SearchParamsInput>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const accountIdParam = firstSearchParam(resolvedSearchParams?.accountId) ?? null;
-  const statusParam = (firstSearchParam(resolvedSearchParams?.status) ?? "all").trim();
-  const providerParam = (firstSearchParam(resolvedSearchParams?.provider) ?? "all").trim();
-  const appealAxisParam = (firstSearchParam(resolvedSearchParams?.appealAxis) ?? "all").trim();
+  const accountIdParam =
+    firstSearchParam(resolvedSearchParams?.accountId) ?? null;
+  const statusParam = (
+    firstSearchParam(resolvedSearchParams?.status) ?? "all"
+  ).trim();
+  const providerParam = (
+    firstSearchParam(resolvedSearchParams?.provider) ?? "all"
+  ).trim();
+  const appealAxisParam = (
+    firstSearchParam(resolvedSearchParams?.appealAxis) ?? "all"
+  ).trim();
   const selectedAppealAxis: AppealAxis | "all" = APPEAL_AXES.includes(
-    appealAxisParam as AppealAxis
+    appealAxisParam as AppealAxis,
   )
     ? (appealAxisParam as AppealAxis)
     : "all";
@@ -226,17 +233,32 @@ export default async function CreativesPage({
   const thumbs = await Promise.all(
     creatives.map(async (row): Promise<ResolvedThumb> => {
       if (!row.storageRef) {
-        return { assetId: null, width: null, height: null, storageReachable: false };
+        return {
+          assetId: null,
+          width: null,
+          height: null,
+          storageReachable: false,
+        };
       }
       const metadata = await readCreativeMetadataByRef(row.storageRef);
       if (!metadata || metadata.assets.length === 0) {
-        return { assetId: null, width: null, height: null, storageReachable: false };
+        return {
+          assetId: null,
+          width: null,
+          height: null,
+          storageReachable: false,
+        };
       }
       const matched = findAssetForCreativeRow(metadata, {
         storagePath: row.storagePath,
       });
       if (!matched) {
-        return { assetId: null, width: null, height: null, storageReachable: false };
+        return {
+          assetId: null,
+          width: null,
+          height: null,
+          storageReachable: false,
+        };
       }
       return {
         assetId: matched.assetId,
@@ -244,7 +266,7 @@ export default async function CreativesPage({
         height: matched.height,
         storageReachable: true,
       };
-    })
+    }),
   );
 
   const showingCount = creatives.length;
@@ -271,7 +293,10 @@ export default async function CreativesPage({
             <button className="btn" type="submit">
               入稿チャット
             </button>
-            <RunCronButton presetName="auto_creative_generation" label="生成を開始" />
+            <RunCronButton
+              presetName="auto_creative_generation"
+              label="生成を開始"
+            />
           </form>
         }
       />
@@ -328,12 +353,14 @@ export default async function CreativesPage({
                 <CreativeCard
                   key={row.id}
                   row={row}
-                  thumb={thumbs[i] ?? {
-                    assetId: null,
-                    width: null,
-                    height: null,
-                    storageReachable: false,
-                  }}
+                  thumb={
+                    thumbs[i] ?? {
+                      assetId: null,
+                      width: null,
+                      height: null,
+                      storageReachable: false,
+                    }
+                  }
                   performance={performanceByCreativeId.get(row.id) ?? null}
                 />
               ))}
@@ -364,14 +391,20 @@ function CreativeCard({
   const adText = spec.adText;
   const accountName = row.account?.displayName || row.account?.key || "AdDroid";
   const headline = adText?.headline || row.displayName;
-  const primaryText = adText?.primaryText || "広告テキスト案は詳細画面で確認できます。";
+  const primaryText =
+    adText?.primaryText || "広告テキスト案は詳細画面で確認できます。";
   const description = adText?.description || "詳しくはこちら";
   const cta = adText?.callToAction || "LEARN_MORE";
   const disabled = row.status === "qa_failed";
+  const carouselCardCount =
+    row.mediaType === "carousel" ? (spec.carousel?.cards.length ?? null) : null;
 
   return (
     <article className="creative-card-wrap">
-      <label className="creative-card__select" title={disabled ? "このCRは入稿候補にできません" : "入稿候補に選択"}>
+      <label
+        className="creative-card__select"
+        title={disabled ? "このCRは入稿候補にできません" : "入稿候補に選択"}
+      >
         <input
           form="creative-submit-selected-form"
           type="checkbox"
@@ -387,7 +420,10 @@ function CreativeCard({
         data-testid="creative-card"
         data-status={row.status}
       >
-        <div className="creative-card__ad-preview" aria-label="Meta広告プレビュー">
+        <div
+          className="creative-card__ad-preview"
+          aria-label="Meta広告プレビュー"
+        >
           <div className="creative-card__ad-header">
             <div className="creative-card__avatar" aria-hidden="true">
               {accountName.slice(0, 1).toUpperCase()}
@@ -442,6 +478,9 @@ function CreativeCard({
         <div className="creative-card__meta">
           <div className="creative-card__row">
             <StatusBadge state={statusState}>{row.status}</StatusBadge>
+            {carouselCardCount ? (
+              <StatusBadge state="info">{carouselCardCount} cards</StatusBadge>
+            ) : null}
           </div>
           <div className="creative-card__genes" aria-label="訴求軸">
             {genes ? (
@@ -463,7 +502,9 @@ function CreativeCard({
                 {row.provider}/{row.model}
               </InlineCode>
             ) : (
-              <span className="creative-card__optional">画像 Provider 未設定</span>
+              <span className="creative-card__optional">
+                画像 Provider 未設定
+              </span>
             )}
           </div>
           {thumb.width && thumb.height ? (
@@ -476,9 +517,14 @@ function CreativeCard({
           <div className="creative-card__performance">
             {performance ? (
               <>
-                <span className="mono">{performance.impressions.toLocaleString("ja-JP")} imp</span>
                 <span className="mono">
-                  CTR {performance.ctr === null ? "—" : `${(performance.ctr * 100).toFixed(1)}%`}
+                  {performance.impressions.toLocaleString("ja-JP")} imp
+                </span>
+                <span className="mono">
+                  CTR{" "}
+                  {performance.ctr === null
+                    ? "—"
+                    : `${(performance.ctr * 100).toFixed(1)}%`}
                 </span>
                 <StatusBadge state={performanceState(performance.verdict)}>
                   {performanceLabel(performance.verdict)}
@@ -506,13 +552,13 @@ function CreativeCard({
 }
 
 async function loadPerformanceByCreativeId(
-  creatives: CreativeRow[]
+  creatives: CreativeRow[],
 ): Promise<Map<string, CreativeCardPerformance>> {
   const accountIds = [
     ...new Set(
       creatives
         .map((creative) => creative.account?.id)
-        .filter((id): id is string => typeof id === "string")
+        .filter((id): id is string => typeof id === "string"),
     ),
   ];
   if (accountIds.length === 0) return new Map();
@@ -524,14 +570,18 @@ async function loadPerformanceByCreativeId(
       const digest = await buildCreativePerformanceDigest({
         store: {
           listAdCreativePerformance: (input) =>
-            listAdCreativePerformanceForWeb(input.accountId, input.since, input.until),
+            listAdCreativePerformanceForWeb(
+              input.accountId,
+              input.since,
+              input.until,
+            ),
         },
         accountId,
         since,
         until,
       });
       return digest.entries;
-    })
+    }),
   );
   const out = new Map<string, CreativeCardPerformance>();
   for (const entry of entries.flat()) {
@@ -544,7 +594,11 @@ async function loadPerformanceByCreativeId(
   return out;
 }
 
-async function listAdCreativePerformanceForWeb(accountId: string, since: string, until: string) {
+async function listAdCreativePerformanceForWeb(
+  accountId: string,
+  since: string,
+  until: string,
+) {
   const snapshots = await prisma.performanceSnapshot.findMany({
     where: {
       accountId,
@@ -579,7 +633,7 @@ async function listAdCreativePerformanceForWeb(accountId: string, since: string,
     ...new Set(
       snapshots
         .map((snapshot) => snapshot.hierarchy?.id)
-        .filter((id): id is string => typeof id === "string")
+        .filter((id): id is string => typeof id === "string"),
     ),
   ];
   if (hierarchyIds.length === 0) return [];
@@ -648,7 +702,9 @@ function performanceState(verdict: CreativePerformanceEntry["verdict"]) {
   }
 }
 
-function performanceLabel(verdict: CreativePerformanceEntry["verdict"]): string {
+function performanceLabel(
+  verdict: CreativePerformanceEntry["verdict"],
+): string {
   switch (verdict) {
     case "winner":
       return "勝ち";

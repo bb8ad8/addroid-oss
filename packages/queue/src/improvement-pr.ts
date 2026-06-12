@@ -39,7 +39,9 @@ import {
   imagePromptVariantsToVariationConditions,
   persistCreativeAssets,
   placementPresetByKey,
+  validateCarouselCreativeSpec,
   type AiRunCreateInputData,
+  type CarouselCreativeSpec,
   type CreativeGenes,
   type CreativeQaPolicy,
   type CreativeStorageAdapter,
@@ -135,6 +137,8 @@ export interface ImprovementPrCreativeAttachment {
   creativeKey: string;
   /** UI 表示用の sanitized 名前。 */
   displayName: string;
+  /** "image" | "carousel" | ... */
+  mediaType?: string;
   /** バリアント連番 (0-based)。 */
   variantIndex: number;
   /** バリアントのプロンプト + style metadata。 */
@@ -175,6 +179,14 @@ export interface ImprovementPrCreativeAttachment {
   parameters?: Record<string, unknown> | null;
   /** creative_qa agent が推定した閉じた語彙の構造化タグ。 */
   genes?: CreativeGenes | null;
+  /** Carousel の場合、カード構成。 */
+  carouselSpec?: CarouselCreativeSpec | null;
+  /** Carousel など複数 asset を持つ creative の per-asset summary。 */
+  assets?: Array<{
+    variantKey: string;
+    storageRef: string | null;
+    storagePath: string | null;
+  }>;
 }
 
 // ---------------------------------------------------------------------
@@ -326,6 +338,8 @@ export interface ImprovementPrCreativeRecord {
   parameters?: Record<string, unknown> | null;
   /** creative_qa agent が推定した閉じた語彙の構造化タグ。 */
   genes?: CreativeGenes | null;
+  /** Carousel の場合、cards/storyArc を creatives.spec に同梱する。 */
+  carouselSpec?: CarouselCreativeSpec | null;
 }
 
 /**
@@ -403,7 +417,9 @@ export interface ImprovementPrStore {
    * 既に `merged` / `active_on_meta` 等の進んだ status を持つ行に対しては
    * 上書きしないことを実装側 (Prisma updateMany) で担保する。
    */
-  linkCreativesToPullRequest(input: ImprovementPrCreativeLinkInput): Promise<void>;
+  linkCreativesToPullRequest(
+    input: ImprovementPrCreativeLinkInput,
+  ): Promise<void>;
 }
 
 // ---------------------------------------------------------------------
@@ -512,7 +528,10 @@ export interface ImprovementPrCreativeGenerationContext {
    * 実務では勝ち広告を seed にして派生案を作ることが多いため、既定は
    * `scale_winner`。低調ノードが明確にある場合は target と reference を分ける。
    */
-  strategy: "scale_winner" | "adapt_winner_to_underperformer" | "refresh_underperformer";
+  strategy:
+    | "scale_winner"
+    | "adapt_winner_to_underperformer"
+    | "refresh_underperformer";
   target: ImprovementPrCreativeNodeContext | null;
   references: ImprovementPrCreativeNodeContext[];
   brandProfile?: ImprovementPrBrandProfileContext | null;
@@ -545,10 +564,23 @@ export interface ImprovementPrCopyVariant {
   description?: string | null;
 }
 
+export interface ImprovementPrCarouselCardPlan {
+  position: number;
+  role: "hook" | "feature" | "social_proof" | "offer" | "cta";
+  headline: string;
+  description: string | null;
+  imageBrief: string;
+  linkUrl?: string | null;
+}
+
 export interface ImprovementPrCopyOutput {
   primary: ImprovementPrCopyVariant;
   alternates: ImprovementPrCopyVariant[];
   rationale: string;
+  carousel?: {
+    cards: ImprovementPrCarouselCardPlan[];
+    storyArc: string;
+  };
 }
 
 export interface ImprovementPrImagePromptVariant {
@@ -574,12 +606,13 @@ export interface ImprovementPrImageDimensionPreset {
   format?: "png" | "jpeg";
 }
 
-export const IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS: ImprovementPrImageDimensionPreset[] = [
-  { key: "feed_square", width: 1080, height: 1080, format: "png" },
-  { key: "feed_portrait", width: 1080, height: 1350, format: "png" },
-  { key: "story_reels", width: 1080, height: 1920, format: "png" },
-  { key: "feed_landscape", width: 1200, height: 628, format: "png" },
-];
+export const IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS: ImprovementPrImageDimensionPreset[] =
+  [
+    { key: "feed_square", width: 1080, height: 1080, format: "png" },
+    { key: "feed_portrait", width: 1080, height: 1350, format: "png" },
+    { key: "story_reels", width: 1080, height: 1920, format: "png" },
+    { key: "feed_landscape", width: 1200, height: 628, format: "png" },
+  ];
 
 export type ImprovementPrCreativeQaRecommendation =
   | "approve"
@@ -642,14 +675,14 @@ export interface ImprovementPrAuditOutput {
  * 早期 short-circuit を担当する。
  */
 export interface ImprovementPrPipelineRunner {
-	  runAnalyst(input: {
-	    accountId: string;
-	    accountDisplayName: string;
-	    currency: string;
-	    snapshotIds: string[];
-	    currentDailyBudget: number;
-	    analysisWindow: ImprovementPrAnalysisWindow;
-	  }): Promise<ImprovementPrAgentRunResult<ImprovementPrAnalystOutput>>;
+  runAnalyst(input: {
+    accountId: string;
+    accountDisplayName: string;
+    currency: string;
+    snapshotIds: string[];
+    currentDailyBudget: number;
+    analysisWindow: ImprovementPrAnalysisWindow;
+  }): Promise<ImprovementPrAgentRunResult<ImprovementPrAnalystOutput>>;
   runStrategy(input: {
     accountId: string;
     accountDisplayName: string;
@@ -665,6 +698,8 @@ export interface ImprovementPrPipelineRunner {
     recommendedApproach: string;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
     performanceDigest?: CreativePerformanceDigest | null;
+    creativeFormat?: "single_image" | "carousel";
+    carouselCardCount?: number;
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrCopyOutput>>;
   runImagePrompt(input: {
     accountId: string;
@@ -679,6 +714,7 @@ export interface ImprovementPrPipelineRunner {
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
     performanceDigest?: CreativePerformanceDigest | null;
     placementSet?: PlacementKey[];
+    carousel?: ImprovementPrCopyOutput["carousel"];
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrImagePromptOutput>>;
   runCreativeQa(input: {
     copy: ImprovementPrCopyOutput;
@@ -706,27 +742,33 @@ export interface ImprovementPrPipelineRunner {
     riskTolerance: ImprovementPrRiskTolerance;
     analystSummary: string;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
-  }): Promise<ImprovementPrAgentRunResult<ImprovementPrMediaBuyerOutput> & {
-    decision: ImprovementPrDecision | null;
-  }>;
+  }): Promise<
+    ImprovementPrAgentRunResult<ImprovementPrMediaBuyerOutput> & {
+      decision: ImprovementPrDecision | null;
+    }
+  >;
   runGitOps(input: {
     accountId: string;
     proposals: ImprovementPrProposal[];
     repo: string;
     baseRef: string;
     branchHint: string;
-  }): Promise<ImprovementPrAgentRunResult<ImprovementPrGitOpsOutput> & {
-    decision: "propose" | "skip" | null;
-  }>;
+  }): Promise<
+    ImprovementPrAgentRunResult<ImprovementPrGitOpsOutput> & {
+      decision: "propose" | "skip" | null;
+    }
+  >;
   runAudit(input: {
     accountId: string;
     proposals: ImprovementPrProposal[];
     files: ImprovementPrFileChange[];
     mode: ImprovementPrExecutionMode;
     safeCategories: string[];
-  }): Promise<ImprovementPrAgentRunResult<ImprovementPrAuditOutput> & {
-    decision: ImprovementPrAuditDecision | null;
-  }>;
+  }): Promise<
+    ImprovementPrAgentRunResult<ImprovementPrAuditOutput> & {
+      decision: ImprovementPrAuditDecision | null;
+    }
+  >;
 }
 
 // ---------------------------------------------------------------------
@@ -762,7 +804,7 @@ export interface ImprovementPrGithubPublisher {
    *   GitOps state は腐らない (audit_logs に痕跡が残る)。
    */
   createPullRequest(
-    req: ImprovementPrPullRequestRequest
+    req: ImprovementPrPullRequestRequest,
   ): Promise<ImprovementPrPullRequestRecord>;
 }
 
@@ -913,6 +955,10 @@ export interface RunImprovementPrOptions {
    * 未指定なら従来どおり ImagePromptVariant 1 件 = 生成 asset 1 件。
    */
   placementSet?: PlacementKey[];
+  /** 生成クリエイティブの形式。未指定時は従来どおり single_image。 */
+  creativeFormat?: "single_image" | "carousel";
+  /** carousel のカード数 (2-10)。未指定時は copy agent の既定値。 */
+  carouselCardCount?: number;
   /** test seam: 現在時刻。 */
   now?: () => Date;
 }
@@ -926,7 +972,7 @@ export interface RunImprovementPrOptions {
  * `succeeded` を返す (= PR 境界を迂回する経路は存在しない)。
  */
 export async function runImprovementPrOnce(
-  opts: RunImprovementPrOptions
+  opts: RunImprovementPrOptions,
 ): Promise<ImprovementPrSummary> {
   const account = await opts.store.findAdAccount({
     workspaceId: opts.workspaceId,
@@ -962,7 +1008,7 @@ export async function runImprovementPrOnce(
 
 async function runPipelineMode(
   opts: RunImprovementPrOptions,
-  account: DailyReportAdAccountSnapshot
+  account: DailyReportAdAccountSnapshot,
 ): Promise<ImprovementPrSummary> {
   const pipeline = opts.pipeline;
   const publisher = opts.publisher;
@@ -976,7 +1022,8 @@ async function runPipelineMode(
   const creativeAttachments: ImprovementPrCreativeAttachment[] = [];
   const safeCategories = opts.safeCategories ?? [];
   const analysisWindow =
-    opts.analysisWindow ?? defaultImprovementPrAnalysisWindow(opts.now?.() ?? new Date());
+    opts.analysisWindow ??
+    defaultImprovementPrAnalysisWindow(opts.now?.() ?? new Date());
   const creativeContext = opts.creativeContext ?? null;
 
   // ── 1) analyst ────────────────────────────────────────────────────────
@@ -1038,7 +1085,13 @@ async function runPipelineMode(
     audienceFocus: strategy.output.audienceFocus,
     recommendedApproach: strategy.output.recommendedApproach,
     creativeContext,
-    ...(creativePerformanceDigest ? { performanceDigest: creativePerformanceDigest } : {}),
+    ...(creativePerformanceDigest
+      ? { performanceDigest: creativePerformanceDigest }
+      : {}),
+    ...(opts.creativeFormat ? { creativeFormat: opts.creativeFormat } : {}),
+    ...(opts.carouselCardCount
+      ? { carouselCardCount: opts.carouselCardCount }
+      : {}),
   });
   const copyRow = await opts.store.createAiRun(copy.aiRunInput);
   aiRunIds.push(copyRow.id);
@@ -1066,8 +1119,11 @@ async function runPipelineMode(
     strategy: strategy.output,
     analysisWindow,
     creativeContext,
-    ...(creativePerformanceDigest ? { performanceDigest: creativePerformanceDigest } : {}),
+    ...(creativePerformanceDigest
+      ? { performanceDigest: creativePerformanceDigest }
+      : {}),
     ...(opts.placementSet ? { placementSet: opts.placementSet } : {}),
+    ...(copy.output.carousel ? { carousel: copy.output.carousel } : {}),
   });
   const imageRow = await opts.store.createAiRun(imagePrompt.aiRunInput);
   aiRunIds.push(imageRow.id);
@@ -1121,6 +1177,16 @@ async function runPipelineMode(
       : creativeQa.output.recommendation === "request_changes"
         ? "qa_warned"
         : "qa_failed";
+  const carouselPlan =
+    opts.creativeFormat === "carousel" && copy.output.carousel
+      ? copy.output.carousel
+      : null;
+  const imagePromptVariantsForGeneration = carouselPlan
+    ? prepareCarouselImagePromptVariants(
+        imagePrompt.output.variants,
+        carouselPlan,
+      )
+    : imagePrompt.output.variants;
 
   // regression fix: image-Provider hop。注入されている (= `enabled=true`) かつ
   // creative_qa が reject してない場合のみ実バイナリを生成し、決定論的 QA →
@@ -1133,9 +1199,9 @@ async function runPipelineMode(
     referenceImages: opts.referenceImages ?? [],
     creativeStorage: opts.creativeStorage ?? null,
     accountKey: account.key,
-    variants: imagePrompt.output.variants,
+    variants: imagePromptVariantsForGeneration,
     dimensionPresets: IMPROVEMENT_PR_IMAGE_DIMENSION_PRESETS,
-    placementSet: opts.placementSet,
+    placementSet: carouselPlan ? undefined : opts.placementSet,
     rationale: imagePrompt.output.rationale,
     // regression fix: production が policy を明示しないケースでも、空 policy
     // で全 check が `skipped` に倒れて素通りすることを禁止する。
@@ -1148,102 +1214,225 @@ async function runPipelineMode(
     skipBinary: creativeQa.output.recommendation === "reject",
   });
 
-  for (let i = 0; i < imageGen.variants.length; i++) {
-    const variant = imageGen.variants[i]!;
-    const creativeKey = `image_${imageRow.id}_v${i}`;
-    const displayName = variant.placementLabel
-      ? `Image variant ${variant.sourceVariantIndex + 1} / ${variant.placementLabel}`
-      : `Image variant ${i + 1}`;
-    const promptVariant: ImprovementPrCreativePromptVariant = {
-      prompt: variant.prompt,
-      negativePrompt: variant.negativePrompt,
-      styleNotes: variant.styleNotes,
-      variantKey: variant.variantKey,
-      baseVariantKey: variant.baseVariantKey,
-      ...(variant.placementKey ? { placementKey: variant.placementKey } : {}),
-      ...(variant.placementLabel ? { placementLabel: variant.placementLabel } : {}),
+  if (carouselPlan) {
+    const carouselSpec = buildCarouselCreativeSpec(carouselPlan);
+    const carouselValidation = validateCarouselCreativeSpec(carouselSpec, {
+      assetVariantKeys: imageGen.perVariant
+        .filter((v) => v.storagePath !== null)
+        .map((v) => v.variantKey),
+    });
+    const firstVariant = imageGen.variants[0] ?? {
+      prompt: carouselPlan.storyArc,
+      negativePrompt: "",
+      styleNotes: "",
+      variantKey: "carousel",
+      baseVariantKey: "carousel",
+      sourceVariantIndex: 0,
     };
-    // image-Provider hop が成功したケースでは、決定論的 QA の per-asset overall
-    // を creative.status に反映させる (qa_passed / qa_warned / qa_failed)。
-    // Provider が注入されたが失敗した場合 (`providerError !== null`) は明示的に
-    // `fallback_text_only` に倒し、benign idle 状態をテーブル側でも一目で
-    // 読み取れるようにする (UI design plan principle 27)。Provider が注入されて
-    // いない (= optional 任意設定の現行運用) 場合は LLM creative_qa.recommendation
-    // 由来の status を維持し、prompt-only な creative を audit metadata として
-    // 残し続ける契約 (= 既存の implementation item acceptance を後退させない)。
-    const variantOutcome = imageGen.perVariant[i] ?? null;
+    const firstOutcome =
+      imageGen.perVariant.find((v) => v.storagePath !== null) ??
+      imageGen.perVariant[0] ??
+      null;
     let creativeStatus: ImprovementPrCreativeStatus;
-    if (imageGen.providerError !== null) {
+    if (!carouselValidation.ok) {
+      creativeStatus = "qa_failed";
+    } else if (imageGen.providerError !== null) {
       creativeStatus = "fallback_text_only";
-    } else if (!imageGen.fallback && variantOutcome?.status) {
-      creativeStatus = variantOutcome.status;
+    } else if (!imageGen.fallback) {
+      const statuses = imageGen.perVariant.map((v) => v.status).filter(Boolean);
+      creativeStatus = statuses.includes("qa_failed")
+        ? "qa_failed"
+        : statuses.includes("qa_warned")
+          ? "qa_warned"
+          : "qa_passed";
     } else {
       creativeStatus = llmCreativeQaStatus;
     }
-    // regression fix: `Creative.storageRef` には **base ref**
-    // (`storage://creatives/<account_key>/<creative_id>`) を焼く。Web UI / proxy が
-    // `readCreativeMetadataByRef(row.storageRef)` で `<base>/metadata.json` を引く
-    // 契約に揃える。per-asset ref をそのまま入れると `<asset>.png/metadata.json`
-    // という存在しない path に解決され、proxy が 410 を返す回路に落ちる。
-    // per-asset の実体パスは引き続き `storagePath` (`creatives/.../<asset>.<ext>`)
-    // が保持し、attachments / PR YAML 側は variantOutcome.storageRef (per-asset)
-    // を使い続ける (こちらは reviewer / proxy の deep-link 用途で per-asset の方が
-    // 直に使える)。
+    const promptVariant: ImprovementPrCreativePromptVariant = {
+      prompt: firstVariant.prompt,
+      negativePrompt: firstVariant.negativePrompt,
+      styleNotes: firstVariant.styleNotes,
+      variantKey: "carousel",
+    };
+    const qaIssues = !carouselValidation.ok
+      ? [
+          ...creativeQa.output.issues,
+          ...carouselValidation.reasons.map((message) => ({
+            severity: "error" as const,
+            category: "carousel_spec",
+            message,
+          })),
+        ]
+      : creativeQa.output.issues;
+    const creativeKey = `image_${imageRow.id}_carousel`;
     const created = await opts.store.createCreative({
       accountId: account.id,
-      // 生成対象ノードが解決できる場合は Creative.hierarchyId に保持する。
-      // これにより UI と audit から「どの広告/広告セット改善か」を逆引きできる。
       hierarchyId: creativeContext?.target?.hierarchyId ?? null,
       key: creativeKey,
-      displayName,
-      mediaType: "image",
+      displayName: `Carousel creative (${carouselPlan.cards.length} cards)`,
+      mediaType: "carousel",
       aiRunId: imageRow.id,
-      variantIndex: i,
+      variantIndex: 0,
       prompt: promptVariant,
       rationale: imagePrompt.output.rationale,
-      adText: creativeAdTextForVariant(copy.output, variant.sourceVariantIndex),
+      adText: creativeAdTextForVariant(copy.output, 0),
       qa: {
         aiRunId: qaRow.id,
-        recommendation: creativeQa.output.recommendation,
-        issues: creativeQa.output.issues,
-        rationale: creativeQa.output.rationale,
+        recommendation: carouselValidation.ok
+          ? creativeQa.output.recommendation
+          : "reject",
+        issues: qaIssues,
+        rationale: carouselValidation.ok
+          ? creativeQa.output.rationale
+          : `Carousel spec failed deterministic checks: ${carouselValidation.reasons.join("; ")}`,
       },
       genes: creativeQa.output.genes ?? null,
+      carouselSpec,
       status: creativeStatus,
-      storageRef: variantOutcome?.storagePath
-        ? imageGen.baseStorageRef
-        : null,
-      storagePath: variantOutcome?.storagePath ?? null,
+      storageRef: firstOutcome?.storagePath ? imageGen.baseStorageRef : null,
+      storagePath: firstOutcome?.storagePath ?? null,
       provider: imageGen.providerName,
       model: imageGen.model,
       parameters: imageGen.parameters,
     });
     creativeIds.push(created.id);
-    // implementation item: PR 添付に必要な per-creative metadata を 1 箇所に集める。
-    // attachments は creative_qa が approve したケースでのみ後段の PR body /
-    // YAML manifest に流れる (qa_warned / qa_failed は短絡パスで PR を作らない)。
     creativeAttachments.push({
       creativeDbId: created.id,
       creativeKey,
-      displayName,
-      variantIndex: i,
+      displayName: `Carousel creative (${carouselPlan.cards.length} cards)`,
+      mediaType: "carousel",
+      variantIndex: 0,
       prompt: promptVariant,
       rationale: imagePrompt.output.rationale,
       status: creativeStatus,
       qa: {
         aiRunId: qaRow.id,
-        recommendation: creativeQa.output.recommendation,
-        issues: creativeQa.output.issues,
-        rationale: creativeQa.output.rationale,
+        recommendation: carouselValidation.ok
+          ? creativeQa.output.recommendation
+          : "reject",
+        issues: qaIssues,
+        rationale: carouselValidation.ok
+          ? creativeQa.output.rationale
+          : `Carousel spec failed deterministic checks: ${carouselValidation.reasons.join("; ")}`,
       },
       genes: creativeQa.output.genes ?? null,
+      carouselSpec,
       imagePromptAiRunId: imageRow.id,
-      storageRef: variantOutcome?.storageRef ?? null,
-      storagePath: variantOutcome?.storagePath ?? null,
+      storageRef: imageGen.baseStorageRef,
+      storagePath: firstOutcome?.storagePath ?? null,
       provider: imageGen.providerName,
       model: imageGen.model,
       parameters: imageGen.parameters,
+      assets: imageGen.perVariant.map((asset) => ({
+        variantKey: asset.variantKey,
+        storageRef: asset.storageRef,
+        storagePath: asset.storagePath,
+      })),
     });
+  } else {
+    for (let i = 0; i < imageGen.variants.length; i++) {
+      const variant = imageGen.variants[i]!;
+      const creativeKey = `image_${imageRow.id}_v${i}`;
+      const displayName = variant.placementLabel
+        ? `Image variant ${variant.sourceVariantIndex + 1} / ${variant.placementLabel}`
+        : `Image variant ${i + 1}`;
+      const promptVariant: ImprovementPrCreativePromptVariant = {
+        prompt: variant.prompt,
+        negativePrompt: variant.negativePrompt,
+        styleNotes: variant.styleNotes,
+        variantKey: variant.variantKey,
+        baseVariantKey: variant.baseVariantKey,
+        ...(variant.placementKey ? { placementKey: variant.placementKey } : {}),
+        ...(variant.placementLabel
+          ? { placementLabel: variant.placementLabel }
+          : {}),
+      };
+      // image-Provider hop が成功したケースでは、決定論的 QA の per-asset overall
+      // を creative.status に反映させる (qa_passed / qa_warned / qa_failed)。
+      // Provider が注入されたが失敗した場合 (`providerError !== null`) は明示的に
+      // `fallback_text_only` に倒し、benign idle 状態をテーブル側でも一目で
+      // 読み取れるようにする (UI design plan principle 27)。Provider が注入されて
+      // いない (= optional 任意設定の現行運用) 場合は LLM creative_qa.recommendation
+      // 由来の status を維持し、prompt-only な creative を audit metadata として
+      // 残し続ける契約 (= 既存の implementation item acceptance を後退させない)。
+      const variantOutcome = imageGen.perVariant[i] ?? null;
+      let creativeStatus: ImprovementPrCreativeStatus;
+      if (imageGen.providerError !== null) {
+        creativeStatus = "fallback_text_only";
+      } else if (!imageGen.fallback && variantOutcome?.status) {
+        creativeStatus = variantOutcome.status;
+      } else {
+        creativeStatus = llmCreativeQaStatus;
+      }
+      // regression fix: `Creative.storageRef` には **base ref**
+      // (`storage://creatives/<account_key>/<creative_id>`) を焼く。Web UI / proxy が
+      // `readCreativeMetadataByRef(row.storageRef)` で `<base>/metadata.json` を引く
+      // 契約に揃える。per-asset ref をそのまま入れると `<asset>.png/metadata.json`
+      // という存在しない path に解決され、proxy が 410 を返す回路に落ちる。
+      // per-asset の実体パスは引き続き `storagePath` (`creatives/.../<asset>.<ext>`)
+      // が保持し、attachments / PR YAML 側は variantOutcome.storageRef (per-asset)
+      // を使い続ける (こちらは reviewer / proxy の deep-link 用途で per-asset の方が
+      // 直に使える)。
+      const created = await opts.store.createCreative({
+        accountId: account.id,
+        // 生成対象ノードが解決できる場合は Creative.hierarchyId に保持する。
+        // これにより UI と audit から「どの広告/広告セット改善か」を逆引きできる。
+        hierarchyId: creativeContext?.target?.hierarchyId ?? null,
+        key: creativeKey,
+        displayName,
+        mediaType: "image",
+        aiRunId: imageRow.id,
+        variantIndex: i,
+        prompt: promptVariant,
+        rationale: imagePrompt.output.rationale,
+        adText: creativeAdTextForVariant(
+          copy.output,
+          variant.sourceVariantIndex,
+        ),
+        qa: {
+          aiRunId: qaRow.id,
+          recommendation: creativeQa.output.recommendation,
+          issues: creativeQa.output.issues,
+          rationale: creativeQa.output.rationale,
+        },
+        genes: creativeQa.output.genes ?? null,
+        status: creativeStatus,
+        storageRef: variantOutcome?.storagePath
+          ? imageGen.baseStorageRef
+          : null,
+        storagePath: variantOutcome?.storagePath ?? null,
+        provider: imageGen.providerName,
+        model: imageGen.model,
+        parameters: imageGen.parameters,
+      });
+      creativeIds.push(created.id);
+      // implementation item: PR 添付に必要な per-creative metadata を 1 箇所に集める。
+      // attachments は creative_qa が approve したケースでのみ後段の PR body /
+      // YAML manifest に流れる (qa_warned / qa_failed は短絡パスで PR を作らない)。
+      creativeAttachments.push({
+        creativeDbId: created.id,
+        creativeKey,
+        displayName,
+        mediaType: "image",
+        variantIndex: i,
+        prompt: promptVariant,
+        rationale: imagePrompt.output.rationale,
+        status: creativeStatus,
+        qa: {
+          aiRunId: qaRow.id,
+          recommendation: creativeQa.output.recommendation,
+          issues: creativeQa.output.issues,
+          rationale: creativeQa.output.rationale,
+        },
+        genes: creativeQa.output.genes ?? null,
+        imagePromptAiRunId: imageRow.id,
+        storageRef: variantOutcome?.storageRef ?? null,
+        storagePath: variantOutcome?.storagePath ?? null,
+        provider: imageGen.providerName,
+        model: imageGen.model,
+        parameters: imageGen.parameters,
+      });
+    }
   }
 
   // regression fix: deterministic per-asset QA が `qa_failed` (= blocking) を
@@ -1261,10 +1450,10 @@ async function runPipelineMode(
   //     PR 自体が立たないため、partition は "approve かつ deterministic blocking"
   //     のケースだけを実質的に切り出す。
   const attachableCreativeAttachments = creativeAttachments.filter(
-    (a) => a.status !== "qa_failed"
+    (a) => a.status !== "qa_failed",
   );
   const attachableCreativeIds = attachableCreativeAttachments.map(
-    (a) => a.creativeDbId
+    (a) => a.creativeDbId,
   );
   const blockedCreativeIds = creativeAttachments
     .filter((a) => a.status === "qa_failed")
@@ -1289,7 +1478,7 @@ async function runPipelineMode(
         a.storageRef !== null &&
         a.storagePath !== null &&
         a.provider !== null &&
-        a.model !== null
+        a.model !== null,
     )
     .map((a) => a.creativeDbId);
 
@@ -1299,7 +1488,7 @@ async function runPipelineMode(
         a.storageRef !== null &&
         a.storagePath !== null &&
         a.provider !== null &&
-        a.model !== null
+        a.model !== null,
     ).length;
     let autoCreativeErrorMessage: string | null = null;
     if (persistedImageCount === 0) {
@@ -1314,7 +1503,8 @@ async function runPipelineMode(
       } else if (creativeQa.output.recommendation !== "approve") {
         autoCreativeErrorMessage = `creative_qa recommended ${creativeQa.output.recommendation}`;
       } else {
-        autoCreativeErrorMessage = "image generation completed with no persisted assets";
+        autoCreativeErrorMessage =
+          "image generation completed with no persisted assets";
       }
     }
     await auditWriter.recordImprovementPrAudit({
@@ -1605,15 +1795,15 @@ async function runPipelineMode(
   });
   const finalDecision = combineApprovalDecisions(
     audit.decision,
-    policyResult.decision
+    policyResult.decision,
   );
   const finalClassification = combineApprovalClassifications(
     audit.output.classification,
-    policyResult.classification
+    policyResult.classification,
   );
   const finalDangerousCategories = unionDangerousCategories(
     audit.output.dangerousCategories,
-    policyResult.dangerousCategories
+    policyResult.dangerousCategories,
   );
 
   // ── 8d) fail-closed for auto_blocked decisions (regression fix) ───────
@@ -1853,10 +2043,12 @@ async function runPipelineMode(
 
 function creativeAdTextForVariant(
   copy: ImprovementPrCopyOutput,
-  variantIndex: number
+  variantIndex: number,
 ): NonNullable<ImprovementPrCreativeRecord["adText"]> {
   const source =
-    variantIndex === 0 ? copy.primary : copy.alternates[variantIndex - 1] ?? copy.primary;
+    variantIndex === 0
+      ? copy.primary
+      : (copy.alternates[variantIndex - 1] ?? copy.primary);
   return {
     primaryText: truncateMetaText(source.primaryText, 125),
     headline: truncateMetaText(source.headline, 40),
@@ -1909,7 +2101,9 @@ interface FailPipelineArgs {
   cronRunId: string | null;
 }
 
-async function failPipeline(args: FailPipelineArgs): Promise<ImprovementPrSummary> {
+async function failPipeline(
+  args: FailPipelineArgs,
+): Promise<ImprovementPrSummary> {
   const creativeIds = args.creativeIds ?? [];
   await args.auditWriter.recordImprovementPrAudit({
     workspaceId: args.opts.workspaceId,
@@ -1959,7 +2153,7 @@ interface BuildSummaryArgs {
 function buildSummary(args: BuildSummaryArgs): ImprovementPrSummary {
   const lastAiRunId =
     args.aiRunIds.length > 0
-      ? args.aiRunIds[args.aiRunIds.length - 1] ?? null
+      ? (args.aiRunIds[args.aiRunIds.length - 1] ?? null)
       : null;
   return {
     status: args.status,
@@ -1977,11 +2171,15 @@ function buildSummary(args: BuildSummaryArgs): ImprovementPrSummary {
     classification: args.audit?.classification ?? null,
     auditDecision: args.audit?.decision ?? null,
     dangerousCategories: args.audit?.dangerousCategories ?? [],
-    ...(args.errorMessage !== undefined ? { errorMessage: args.errorMessage } : {}),
+    ...(args.errorMessage !== undefined
+      ? { errorMessage: args.errorMessage }
+      : {}),
   };
 }
 
-function defaultImprovementPrAnalysisWindow(now: Date): ImprovementPrAnalysisWindow {
+function defaultImprovementPrAnalysisWindow(
+  now: Date,
+): ImprovementPrAnalysisWindow {
   const period = now.toISOString().slice(0, 10);
   return {
     periodStart: period,
@@ -2057,7 +2255,9 @@ function composePrBody(input: {
     input.policyReasons.length > 0
       ? input.policyReasons.map((r) => `- ${r}`).join("\n")
       : "- (no deterministic policy reasons)";
-  const creativeContextLines = formatCreativeContextForPrBody(input.creativeContext);
+  const creativeContextLines = formatCreativeContextForPrBody(
+    input.creativeContext,
+  );
   return [
     "## AI rationale",
     input.aiRationale,
@@ -2078,22 +2278,22 @@ function composePrBody(input: {
     `- after: \`${input.budgetImpact.afterCurrency}\``,
     `- ${input.budgetImpact.notes}`,
     "",
-	    "## Dry-run",
-	    formatPlanValidationForPrBody(input.planValidation),
-	    "",
-	    "## Creative context",
-	    creativeContextLines,
-	    "",
-	    "## 生成クリエイティブ",
+    "## Dry-run",
+    formatPlanValidationForPrBody(input.planValidation),
+    "",
+    "## Creative context",
+    creativeContextLines,
+    "",
+    "## 生成クリエイティブ",
     formatCreativesForPrBody(input.creatives),
     "",
     "## Snapshots",
     snapshotLine,
-	  ].join("\n");
-	}
+  ].join("\n");
+}
 
 function formatCreativeContextForPrBody(
-  context: ImprovementPrCreativeGenerationContext | null
+  context: ImprovementPrCreativeGenerationContext | null,
 ): string {
   if (!context) {
     return "- 文脈情報なし。アカウント単位の最小プロンプトで生成しました。";
@@ -2102,7 +2302,7 @@ function formatCreativeContextForPrBody(
   lines.push(`- strategy: \`${context.strategy}\``);
   if (context.target) {
     lines.push(
-      `- target: \`${context.target.hierarchy}\` ${oneLine(context.target.displayName)} (\`${context.target.nodeKey}\`)`
+      `- target: \`${context.target.hierarchy}\` ${oneLine(context.target.displayName)} (\`${context.target.nodeKey}\`)`,
     );
     lines.push(`- target rationale: ${oneLine(context.target.rationale)}`);
   } else {
@@ -2112,7 +2312,7 @@ function formatCreativeContextForPrBody(
     lines.push("- references:");
     for (const ref of context.references.slice(0, 3)) {
       lines.push(
-        `  - \`${ref.hierarchy}\` ${oneLine(ref.displayName)} (\`${ref.nodeKey}\`): ${oneLine(ref.rationale)}`
+        `  - \`${ref.hierarchy}\` ${oneLine(ref.displayName)} (\`${ref.nodeKey}\`): ${oneLine(ref.rationale)}`,
       );
     }
   } else {
@@ -2142,7 +2342,7 @@ function formatCreativeContextForPrBody(
  * PR レビュー視点でも担保する。
  */
 function formatCreativesForPrBody(
-  creatives: ImprovementPrCreativeAttachment[]
+  creatives: ImprovementPrCreativeAttachment[],
 ): string {
   if (creatives.length === 0) {
     return [
@@ -2163,6 +2363,7 @@ function formatCreativesForPrBody(
     const risk = creativeAttachmentRisk(c.qa.recommendation);
     lines.push(`- creative: \`${c.creativeDbId}\``);
     lines.push(`  - key: \`${c.creativeKey}\``);
+    lines.push(`  - media type: \`${c.mediaType ?? "image"}\``);
     lines.push(`  - variant: ${c.variantIndex}`);
     lines.push(`  - status: \`${c.status}\``);
     lines.push(`  - provider/model: ${provider}`);
@@ -2175,13 +2376,30 @@ function formatCreativesForPrBody(
     if (c.prompt.styleNotes && c.prompt.styleNotes.length > 0) {
       lines.push(`  - style notes: ${oneLine(c.prompt.styleNotes)}`);
     }
-    lines.push(`  - QA 結果: \`${c.qa.recommendation}\` — ${oneLine(c.qa.rationale)}`);
+    if (c.carouselSpec) {
+      lines.push(`  - carousel story: ${oneLine(c.carouselSpec.storyArc)}`);
+      lines.push(`  - cards:`);
+      for (const card of c.carouselSpec.cards) {
+        const asset = c.assets?.find(
+          (a) => a.variantKey === card.assetVariantKey,
+        );
+        const assetRef = asset?.storageRef
+          ? ` \`${asset.storageRef}\``
+          : " (asset 未保存)";
+        lines.push(
+          `    - ${card.position}. \`${card.role}\` ${oneLine(card.headline)} → \`${card.assetVariantKey}\`${assetRef}`,
+        );
+      }
+    }
+    lines.push(
+      `  - QA 結果: \`${c.qa.recommendation}\` — ${oneLine(c.qa.rationale)}`,
+    );
     if (c.qa.issues.length === 0) {
       lines.push(`    - checks: (no issues reported)`);
     } else {
       for (const issue of c.qa.issues) {
         lines.push(
-          `    - [${issue.severity}] \`${issue.category}\`: ${oneLine(issue.message)}`
+          `    - [${issue.severity}] \`${issue.category}\`: ${oneLine(issue.message)}`,
         );
       }
     }
@@ -2193,7 +2411,7 @@ function formatCreativesForPrBody(
 }
 
 function creativeAttachmentRisk(
-  recommendation: ImprovementPrCreativeQaRecommendation
+  recommendation: ImprovementPrCreativeQaRecommendation,
 ): string {
   switch (recommendation) {
     case "approve":
@@ -2267,7 +2485,7 @@ function isPathSafeSegment(s: string): boolean {
  */
 function renderCreativeManifestYaml(
   accountKey: string,
-  a: ImprovementPrCreativeAttachment
+  a: ImprovementPrCreativeAttachment,
 ): string {
   const lines: string[] = [];
   lines.push("version: 1");
@@ -2276,7 +2494,7 @@ function renderCreativeManifestYaml(
   lines.push(`  key: ${quoteYaml(a.creativeKey)}`);
   lines.push(`  accountKey: ${quoteYaml(accountKey)}`);
   lines.push(`  displayName: ${quoteYaml(a.displayName)}`);
-  lines.push(`  mediaType: "image"`);
+  lines.push(`  mediaType: ${quoteYaml(a.mediaType ?? "image")}`);
   lines.push(`  variantIndex: ${a.variantIndex}`);
   lines.push(`  status: ${quoteYaml(a.status)}`);
   lines.push("prompt:");
@@ -2287,7 +2505,9 @@ function renderCreativeManifestYaml(
   lines.push("generation:");
   lines.push(`  provider: ${a.provider ? quoteYaml(a.provider) : "null"}`);
   lines.push(`  model: ${a.model ? quoteYaml(a.model) : "null"}`);
-  lines.push(`  storageRef: ${a.storageRef ? quoteYaml(a.storageRef) : "null"}`);
+  lines.push(
+    `  storageRef: ${a.storageRef ? quoteYaml(a.storageRef) : "null"}`,
+  );
   // regression fix: image-Provider hop が orchestrator に注入する `parameters`
   // (variationConditions / purpose / variantCount 等) を manifest にも残し、
   // PR レビュー時に variant 数や寸法・format を YAML から確認できるようにする。
@@ -2302,6 +2522,36 @@ function renderCreativeManifestYaml(
     appendYamlBlock(lines, a.parameters, "    ");
   } else {
     lines.push("  parameters: null");
+  }
+  if (a.assets && a.assets.length > 0) {
+    lines.push("  assets:");
+    for (const asset of a.assets) {
+      lines.push(`    - variantKey: ${quoteYaml(asset.variantKey)}`);
+      lines.push(
+        `      storageRef: ${asset.storageRef ? quoteYaml(asset.storageRef) : "null"}`,
+      );
+      lines.push(
+        `      storagePath: ${asset.storagePath ? quoteYaml(asset.storagePath) : "null"}`,
+      );
+    }
+  }
+  if (a.carouselSpec) {
+    lines.push("carousel:");
+    lines.push(`  schemaVersion: ${a.carouselSpec.schemaVersion}`);
+    lines.push(`  storyArc: ${quoteYaml(a.carouselSpec.storyArc)}`);
+    lines.push("  cards:");
+    for (const card of a.carouselSpec.cards) {
+      lines.push(`    - position: ${card.position}`);
+      lines.push(`      role: ${quoteYaml(card.role)}`);
+      lines.push(`      headline: ${quoteYaml(card.headline)}`);
+      lines.push(
+        `      description: ${card.description ? quoteYaml(card.description) : "null"}`,
+      );
+      lines.push(
+        `      linkUrl: ${card.linkUrl ? quoteYaml(card.linkUrl) : "null"}`,
+      );
+      lines.push(`      assetVariantKey: ${quoteYaml(card.assetVariantKey)}`);
+    }
   }
   lines.push("qa:");
   lines.push(`  recommendation: ${quoteYaml(a.qa.recommendation)}`);
@@ -2349,7 +2599,7 @@ function quoteYaml(s: string): string {
 function appendYamlBlock(
   lines: string[],
   obj: Record<string, unknown>,
-  indent: string
+  indent: string,
 ): void {
   for (const [k, v] of Object.entries(obj)) {
     appendYamlKeyValue(lines, k, v, indent);
@@ -2360,7 +2610,7 @@ function appendYamlKeyValue(
   lines: string[],
   key: string,
   value: unknown,
-  indent: string
+  indent: string,
 ): void {
   if (Array.isArray(value)) {
     if (value.length === 0) {
@@ -2387,7 +2637,7 @@ function appendYamlKeyValue(
 function appendYamlArrayItems(
   lines: string[],
   arr: unknown[],
-  indent: string
+  indent: string,
 ): void {
   // parent key の次行に `- ` 行を並べる (parent と同じ列の `+2` indent)。
   // 既存 manifest の `  issues:` → `    -` の 2-space ステップに揃える。
@@ -2427,12 +2677,12 @@ function appendYamlArrayItems(
           appendYamlBlock(
             lines,
             firstValue as Record<string, unknown>,
-            continuationIndent + "  "
+            continuationIndent + "  ",
           );
         }
       } else {
         lines.push(
-          `${itemIndent}- ${firstKey}: ${formatYamlScalar(firstValue)}`
+          `${itemIndent}- ${firstKey}: ${formatYamlScalar(firstValue)}`,
         );
       }
       for (let i = 1; i < entries.length; i++) {
@@ -2456,20 +2706,17 @@ function formatYamlScalar(value: unknown): string {
 }
 
 function formatPlanValidationForPrBody(
-  p: ImprovementPrPlanValidationResult
+  p: ImprovementPrPlanValidationResult,
 ): string {
   if (!p.available) {
-    return [
-      `- status: \`skipped\``,
-      `- ${p.summary}`,
-    ].join("\n");
+    return [`- status: \`skipped\``, `- ${p.summary}`].join("\n");
   }
   const lines: string[] = [];
   lines.push(`- status: \`${p.ok ? "ok" : "error"}\``);
   lines.push(`- risk: \`${p.risk}\``);
   lines.push(
     `- counts: +${p.counts.creates} ~${p.counts.updates} -${p.counts.deletes}` +
-      ` (errors=${p.counts.errors} warnings=${p.counts.warnings})`
+      ` (errors=${p.counts.errors} warnings=${p.counts.warnings})`,
   );
   lines.push(`- durationMs: \`${p.durationMs}\``);
   if (p.errors.length > 0) {
@@ -2493,7 +2740,7 @@ function formatPlanValidationForPrBody(
 }
 
 function planValidationToMetadata(
-  p: ImprovementPrPlanValidationResult
+  p: ImprovementPrPlanValidationResult,
 ): Record<string, unknown> {
   return {
     available: p.available,
@@ -2508,12 +2755,14 @@ function planValidationToMetadata(
 }
 
 function creativeGenerationContextToMetadata(
-  context: ImprovementPrCreativeGenerationContext | null
+  context: ImprovementPrCreativeGenerationContext | null,
 ): Record<string, unknown> | null {
   if (!context) return null;
   return {
     strategy: context.strategy,
-    target: context.target ? creativeNodeContextToMetadata(context.target) : null,
+    target: context.target
+      ? creativeNodeContextToMetadata(context.target)
+      : null,
     references: context.references.map(creativeNodeContextToMetadata),
     brandProfile: context.brandProfile ?? null,
     notes: context.notes ?? [],
@@ -2521,7 +2770,7 @@ function creativeGenerationContextToMetadata(
 }
 
 function creativeNodeContextToMetadata(
-  node: ImprovementPrCreativeNodeContext
+  node: ImprovementPrCreativeNodeContext,
 ): Record<string, unknown> {
   return {
     hierarchyId: node.hierarchyId,
@@ -2614,14 +2863,17 @@ interface RunImageGenerationHopResult {
  *   による storage 不整合より、prompt-only PR を優先する)。
  */
 async function runImageGenerationHop(
-  input: RunImageGenerationHopInput
+  input: RunImageGenerationHopInput,
 ): Promise<RunImageGenerationHopResult> {
   let prepared = prepareImagePromptVariantsForGeneration({
     variants: input.variants,
     placementSet: input.placementSet,
   });
   let variationConditions: ImageVariationCondition[];
-  let placementExpansion = buildPlacementExpansionMetadata(prepared, input.placementSet);
+  let placementExpansion = buildPlacementExpansionMetadata(
+    prepared,
+    input.placementSet,
+  );
   const baseEmpty = () =>
     prepared.variants.map((variant) => ({
       variantKey: variant.variantKey,
@@ -2656,15 +2908,20 @@ async function runImageGenerationHop(
         height: variant.height ?? 1080,
         format: variant.format ?? "png",
         ...(variant.styleNotes ? { styleNotes: variant.styleNotes } : {}),
-        ...(variant.negativePrompt ? { negativePrompt: variant.negativePrompt } : {}),
+        ...(variant.negativePrompt
+          ? { negativePrompt: variant.negativePrompt }
+          : {}),
         variantKey: variant.variantKey,
       }));
     } else {
-      variationConditions = imagePromptVariantsToVariationConditions(prepared.variants, {
-        aspectRatio: "1:1",
-        dimensionPresets: input.dimensionPresets,
-        defaultFormat: "png",
-      });
+      variationConditions = imagePromptVariantsToVariationConditions(
+        prepared.variants,
+        {
+          aspectRatio: "1:1",
+          dimensionPresets: input.dimensionPresets,
+          defaultFormat: "png",
+        },
+      );
       prepared = {
         ...prepared,
         variants: prepared.variants.map((variant, i) => ({
@@ -2675,7 +2932,10 @@ async function runImageGenerationHop(
           format: variationConditions[i]?.format ?? variant.format,
         })),
       };
-      placementExpansion = buildPlacementExpansionMetadata(prepared, input.placementSet);
+      placementExpansion = buildPlacementExpansionMetadata(
+        prepared,
+        input.placementSet,
+      );
     }
   } catch {
     return {
@@ -2801,7 +3061,8 @@ async function runImageGenerationHop(
     providerName: result.generation.meta.provider,
     model: result.generation.meta.model,
     parameters: {
-      variationConditions: result.generation.meta.parameters.variationConditions,
+      variationConditions:
+        result.generation.meta.parameters.variationConditions,
       purpose: result.generation.meta.parameters.purpose,
       variantCount: result.generation.meta.parameters.variantCount,
       ...(placementExpansion ? { placementExpansion } : {}),
@@ -2815,6 +3076,51 @@ async function runImageGenerationHop(
 }
 
 const MAX_PLACEMENT_EXPANDED_VARIANTS = 12;
+
+function prepareCarouselImagePromptVariants(
+  variants: ImprovementPrImagePromptVariant[],
+  carousel: NonNullable<ImprovementPrCopyOutput["carousel"]>,
+): ImprovementPrImagePromptVariant[] {
+  const byKey = new Map<string, ImprovementPrImagePromptVariant>();
+  for (const variant of variants) {
+    if (variant.variantKey) byKey.set(variant.variantKey, variant);
+  }
+  const prepared: ImprovementPrImagePromptVariant[] = [];
+  for (const card of carousel.cards) {
+    const key = `card-${card.position}`;
+    const variant = byKey.get(key);
+    if (!variant) continue;
+    prepared.push({
+      ...variant,
+      variantKey: key,
+      width: 1080,
+      height: 1080,
+      format: "png",
+      aspectRatio: "1:1",
+    });
+  }
+  return prepared;
+}
+
+function buildCarouselCreativeSpec(
+  carousel: NonNullable<ImprovementPrCopyOutput["carousel"]>,
+): CarouselCreativeSpec {
+  return {
+    schemaVersion: 1,
+    storyArc: carousel.storyArc,
+    cards: carousel.cards
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((card) => ({
+        position: card.position,
+        role: card.role,
+        headline: card.headline,
+        description: card.description,
+        linkUrl: card.linkUrl ?? null,
+        assetVariantKey: `card-${card.position}`,
+      })),
+  };
+}
 
 function prepareImagePromptVariantsForGeneration(input: {
   variants: ImprovementPrImagePromptVariant[];
@@ -2846,18 +3152,23 @@ function prepareImagePromptVariantsForGeneration(input: {
 
   const placements = dedupePlacementSet(input.placementSet);
   if (placements.length === 0) {
-    return prepareImagePromptVariantsForGeneration({ variants: input.variants });
+    return prepareImagePromptVariantsForGeneration({
+      variants: input.variants,
+    });
   }
   const allowedBaseCount = Math.max(
     1,
-    Math.floor(MAX_PLACEMENT_EXPANDED_VARIANTS / placements.length)
+    Math.floor(MAX_PLACEMENT_EXPANDED_VARIANTS / placements.length),
   );
   const usedVariants = input.variants.slice(0, allowedBaseCount);
   const expanded: PreparedImagePromptVariant[] = [];
   for (let i = 0; i < usedVariants.length; i += 1) {
     const base = usedVariants[i]!;
     const baseVariantKey = base.variantKey ?? `variant-${i}`;
-    const plan = buildPlacementExpansionPlan({ ...base, variantKey: baseVariantKey }, placements);
+    const plan = buildPlacementExpansionPlan(
+      { ...base, variantKey: baseVariantKey },
+      placements,
+    );
     for (const expansion of plan.expansions) {
       const preset = placementPresetByKey(expansion.placementKey);
       expanded.push({
@@ -2885,7 +3196,7 @@ function prepareImagePromptVariantsForGeneration(input: {
 
 function buildPlacementExpansionMetadata(
   prepared: ReturnType<typeof prepareImagePromptVariantsForGeneration>,
-  placementSet?: PlacementKey[]
+  placementSet?: PlacementKey[],
 ): Record<string, unknown> | null {
   if (!placementSet || placementSet.length === 0) return null;
   const placements = dedupePlacementSet(placementSet);
@@ -2899,6 +3210,8 @@ function buildPlacementExpansionMetadata(
   };
 }
 
-function dedupePlacementSet(placements: readonly PlacementKey[]): PlacementKey[] {
+function dedupePlacementSet(
+  placements: readonly PlacementKey[],
+): PlacementKey[] {
   return [...new Set(placements)];
 }
