@@ -31,6 +31,7 @@ import {
   type ImprovementPrPullRequestRequest,
   type ImprovementPrStore,
   type ImprovementPrStrategyOutput,
+  type ProposalOutcomeRow,
 } from "../index.js";
 import {
   ImageProviderError,
@@ -50,6 +51,8 @@ class FakeImprovementPrStore implements ImprovementPrStore {
   aiRunCalls: AiRunCreateInputData[] = [];
   creativeCalls: ImprovementPrCreativeRecord[] = [];
   creativeLinkCalls: ImprovementPrCreativeLinkInput[] = [];
+  aiRunLinkCalls: Array<{ aiRunId: string; pullRequestId: string }> = [];
+  proposalOutcomeRows: ProposalOutcomeRow[] = [];
   private nextAiRunId = 1;
   private nextCreativeId = 1;
   constructor(
@@ -64,6 +67,9 @@ class FakeImprovementPrStore implements ImprovementPrStore {
   async listAdCreativePerformance() {
     return this.creativePerformanceRows ?? [];
   }
+  async listProposalOutcomes() {
+    return this.proposalOutcomeRows;
+  }
   async createAiRun(data: AiRunCreateInputData) {
     this.aiRunCalls.push(data);
     return { id: `run-${this.nextAiRunId++}` };
@@ -74,6 +80,9 @@ class FakeImprovementPrStore implements ImprovementPrStore {
   }
   async linkCreativesToPullRequest(input: ImprovementPrCreativeLinkInput) {
     this.creativeLinkCalls.push(input);
+  }
+  async linkAiRunToPullRequest(input: { aiRunId: string; pullRequestId: string }) {
+    this.aiRunLinkCalls.push(input);
   }
 }
 
@@ -243,9 +252,14 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
   calls: string[] = [];
   analystInputs: Parameters<ImprovementPrPipelineRunner["runAnalyst"]>[0][] =
     [];
+  strategyInputs: Parameters<ImprovementPrPipelineRunner["runStrategy"]>[0][] =
+    [];
   copyInputs: Parameters<ImprovementPrPipelineRunner["runCopy"]>[0][] = [];
   imagePromptInputs: Parameters<
     ImprovementPrPipelineRunner["runImagePrompt"]
+  >[0][] = [];
+  mediaBuyerInputs: Parameters<
+    ImprovementPrPipelineRunner["runMediaBuyer"]
   >[0][] = [];
   constructor(private readonly cfg: PipelineOverrides = {}) {}
 
@@ -262,9 +276,10 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
     });
   }
   async runStrategy(
-    _input: unknown,
+    input: Parameters<ImprovementPrPipelineRunner["runStrategy"]>[0],
   ): Promise<ImprovementPrAgentRunResult<ImprovementPrStrategyOutput>> {
     this.calls.push("strategy");
+    this.strategyInputs.push(input);
     if (this.cfg.failures?.strategy) return fail("strategy");
     return ok("strategy", {
       recommendedApproach: "lower CPC by tightening audience",
@@ -330,8 +345,11 @@ class FakePipelineRunner implements ImprovementPrPipelineRunner {
       error: null,
     };
   }
-  async runMediaBuyer(_input: unknown) {
+  async runMediaBuyer(
+    input: Parameters<ImprovementPrPipelineRunner["runMediaBuyer"]>[0],
+  ) {
     this.calls.push("media_buyer");
+    this.mediaBuyerInputs.push(input);
     if (this.cfg.failures?.mediaBuyer) {
       return {
         ...fail<ImprovementPrMediaBuyerOutput>("media_buyer"),
@@ -580,6 +598,9 @@ test("pipeline: runImprovementPrOnce runs all 8 agents, opens PR, writes audit",
   // PR was created
   assert.equal(publisher.calls.length, 1);
   assert.equal(publisher.calls[0]!.branchName, "addroid/improve-cmp-1");
+  assert.deepEqual(store.aiRunLinkCalls, [
+    { aiRunId: "run-6", pullRequestId: "pr-1" },
+  ]);
   assert.match(publisher.calls[0]!.prBody, /## AI rationale/);
   assert.match(publisher.calls[0]!.prBody, /## Risk/);
   assert.match(publisher.calls[0]!.prBody, /## Budget impact/);
@@ -690,6 +711,98 @@ test("pipeline: creative performance digest is injected into copy and image_prom
     pipeline.copyInputs[0]!.performanceDigest!.periodEnd,
     "2026-05-31",
   );
+});
+
+test("pipeline: proposal feedback is injected into strategy and media_buyer inputs", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  store.proposalOutcomeRows = [
+    {
+      decision: "rejected",
+      decidedAt: new Date("2026-06-12T00:00:00.000Z"),
+      rejectionReason: "budget_too_aggressive",
+      rejectionNote: "予算を一気に上げすぎ。今月は段階的にしたい。",
+      proposals: [
+        {
+          category: "budget_increase",
+          proposedChange: "daily budget +50%",
+        },
+      ],
+    },
+    {
+      decision: "approved",
+      decidedAt: new Date("2026-06-11T00:00:00.000Z"),
+      rejectionReason: null,
+      rejectionNote: null,
+      proposals: [
+        {
+          category: "budget_increase",
+          proposedChange: "daily budget +10%",
+        },
+      ],
+    },
+  ];
+  const pipeline = new FakePipelineRunner();
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+    now: () => new Date("2026-06-13T00:00:00.000Z"),
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.deepEqual(pipeline.strategyInputs[0]!.workspaceFeedback, {
+    approvalStats: [
+      {
+        category: "budget_increase",
+        approvedRatio: 0.5,
+        sampleSize: 2,
+      },
+    ],
+    recentRejections: [
+      {
+        category: "budget_increase",
+        proposedChange: "daily budget +50%",
+        reason: "budget_too_aggressive",
+        note: "予算を一気に上げすぎ。今月は段階的にしたい。",
+      },
+    ],
+  });
+  assert.deepEqual(
+    pipeline.mediaBuyerInputs[0]!.workspaceFeedback,
+    pipeline.strategyInputs[0]!.workspaceFeedback,
+  );
+});
+
+test("pipeline: proposal feedback is omitted when the workspace has no outcomes", async () => {
+  const store = new FakeImprovementPrStore(ACCOUNT);
+  const pipeline = new FakePipelineRunner();
+  const publisher = new FakePublisher();
+  const audit = new FakeAuditWriter();
+  const planValidator = new FakePlanValidator();
+
+  const summary = await runImprovementPrOnce({
+    workspaceId: "ws-1",
+    mode: "proposal",
+    accountKey: "primary",
+    store,
+    pipeline,
+    publisher,
+    planValidator,
+    audit,
+  });
+
+  assert.equal(summary.status, "succeeded");
+  assert.equal("workspaceFeedback" in pipeline.strategyInputs[0]!, false);
+  assert.equal("workspaceFeedback" in pipeline.mediaBuyerInputs[0]!, false);
 });
 
 test("pipeline: auto_creative_generation stops after creative QA and does not open PR", async () => {

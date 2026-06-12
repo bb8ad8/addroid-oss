@@ -88,6 +88,7 @@ import {
   landingPageUrlForPrompt,
 } from "./creative-landing-page-context.js";
 import { runPlanForRoot } from "./plan-runtime.js";
+import { createPrismaProposalFeedbackStore } from "./proposal-feedback-runtime.js";
 
 // ---------------------------------------------------------------------
 // Snapshot store — Prisma 実装 (findAdAccount + createAiRun)
@@ -96,6 +97,7 @@ import { runPlanForRoot } from "./plan-runtime.js";
 export function createPrismaImprovementPrStore(
   prisma: PrismaClient,
 ): ImprovementPrStore {
+  const proposalFeedbackStore = createPrismaProposalFeedbackStore(prisma);
   return {
     async findAdAccount(input): Promise<DailyReportAdAccountSnapshot | null> {
       const row = await prisma.adAccount.findUnique({
@@ -211,6 +213,9 @@ export function createPrismaImprovementPrStore(
         }));
       });
     },
+    async listProposalOutcomes(input) {
+      return await proposalFeedbackStore.listProposalOutcomes(input);
+    },
     async createAiRun(data: AiRunCreateInputData): Promise<{ id: string }> {
       const created = await prisma.aiRun.create({
         data: {
@@ -238,6 +243,15 @@ export function createPrismaImprovementPrStore(
         select: { id: true },
       });
       return { id: created.id };
+    },
+    async linkAiRunToPullRequest(input): Promise<void> {
+      await prisma.aiRun.update({
+        where: { id: input.aiRunId },
+        data: {
+          linkedRefType: "github_pull_request",
+          linkedRefId: input.pullRequestId,
+        },
+      });
     },
     async createCreative(data): Promise<{ id: string }> {
       // regression fix: image_prompt の prompt/negativePrompt/styleNotes/rationale
@@ -527,6 +541,9 @@ export function createImprovementPrPipelineRunner(
         ...(input.creativeContext?.notes
           ? { constraints: input.creativeContext.notes }
           : {}),
+        ...(input.workspaceFeedback
+          ? { workspaceFeedback: input.workspaceFeedback }
+          : {}),
       };
       try {
         const result = await runStrategyAgent(ctxBase(), agentInput);
@@ -782,6 +799,9 @@ export function createImprovementPrPipelineRunner(
         currentDailyBudget: input.currentDailyBudget,
         riskTolerance: input.riskTolerance,
         analystSummary: input.analystSummary,
+        ...(input.workspaceFeedback
+          ? { workspaceFeedback: input.workspaceFeedback }
+          : {}),
       };
       try {
         const result = await runMediaBuyerAgent(ctxBase(), agentInput);

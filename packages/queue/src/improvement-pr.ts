@@ -60,6 +60,12 @@ import {
   type CreativePerformanceStore,
 } from "./creative-performance.js";
 import {
+  buildProposalFeedbackDigest,
+  proposalFeedbackDigestToAgentInput,
+  type ProposalFeedbackStore,
+  type ProposalWorkspaceFeedback,
+} from "./proposal-feedback.js";
+import {
   combineApprovalClassifications,
   combineApprovalDecisions,
   evaluateApprovalPolicy,
@@ -393,11 +399,16 @@ export interface ImprovementPrStore {
    * improvement_pr keeps the pre-feedback prompt inputs unchanged.
    */
   listAdCreativePerformance?: CreativePerformanceStore["listAdCreativePerformance"];
+  listProposalOutcomes?: ProposalFeedbackStore["listProposalOutcomes"];
   /**
    * 8 agent の sanitized ai_runs 行を 1 行 insert する。
    * 呼び出し側 (apps/worker) は `prisma.aiRun.create({ data })` を実行する。
    */
   createAiRun(data: AiRunCreateInputData): Promise<{ id: string }>;
+  linkAiRunToPullRequest?(input: {
+    aiRunId: string;
+    pullRequestId: string;
+  }): Promise<void>;
   /**
    * image_prompt が出力した 1 バリアント分のクリエイティブ metadata を
    * `creatives` テーブルに 1 行 insert する。`spec` は image_prompt の
@@ -690,6 +701,7 @@ export interface ImprovementPrPipelineRunner {
     analystCommentary: string;
     riskTolerance: ImprovementPrRiskTolerance;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
+    workspaceFeedback?: ProposalWorkspaceFeedback;
   }): Promise<ImprovementPrAgentRunResult<ImprovementPrStrategyOutput>>;
   runCopy(input: {
     accountId: string;
@@ -742,6 +754,7 @@ export interface ImprovementPrPipelineRunner {
     riskTolerance: ImprovementPrRiskTolerance;
     analystSummary: string;
     creativeContext?: ImprovementPrCreativeGenerationContext | null;
+    workspaceFeedback?: ProposalWorkspaceFeedback;
   }): Promise<
     ImprovementPrAgentRunResult<ImprovementPrMediaBuyerOutput> & {
       decision: ImprovementPrDecision | null;
@@ -1025,6 +1038,7 @@ async function runPipelineMode(
     opts.analysisWindow ??
     defaultImprovementPrAnalysisWindow(opts.now?.() ?? new Date());
   const creativeContext = opts.creativeContext ?? null;
+  const workspaceFeedback = await loadProposalWorkspaceFeedback(opts);
 
   // ── 1) analyst ────────────────────────────────────────────────────────
   const analyst = await pipeline.runAnalyst({
@@ -1057,6 +1071,7 @@ async function runPipelineMode(
     analystCommentary: analyst.output.commentary,
     riskTolerance: opts.riskTolerance ?? "balanced",
     creativeContext,
+    ...(workspaceFeedback ? { workspaceFeedback } : {}),
   });
   const strategyRow = await opts.store.createAiRun(strategy.aiRunInput);
   aiRunIds.push(strategyRow.id);
@@ -1599,6 +1614,7 @@ async function runPipelineMode(
     riskTolerance: opts.riskTolerance ?? "balanced",
     analystSummary: analyst.output.commentary,
     creativeContext,
+    ...(workspaceFeedback ? { workspaceFeedback } : {}),
   });
   const mediaBuyerRow = await opts.store.createAiRun(mediaBuyer.aiRunInput);
   aiRunIds.push(mediaBuyerRow.id);
@@ -1955,7 +1971,14 @@ async function runPipelineMode(
     });
   }
 
-  // ── 9b) link creatives to PR (this implementation) ───────────────────
+  // ── 9b) link media_buyer ai_run / creatives to PR ────────────────────
+  if (opts.store.linkAiRunToPullRequest) {
+    await opts.store.linkAiRunToPullRequest({
+      aiRunId: mediaBuyerRow.id,
+      pullRequestId: pr.pullRequestId,
+    });
+  }
+
   // PR が立ったので、creative_qa を通った variant 行に pullRequestId を埋め
   // status を `attached_to_pr` に進める。creativeIds が空 (= image_prompt が
   // variant を出さなかった、または QA で rejected) の場合は何もしない契約。
@@ -2039,6 +2062,25 @@ async function runPipelineMode(
       dangerousCategories: finalDangerousCategories,
     },
   });
+}
+
+async function loadProposalWorkspaceFeedback(
+  opts: RunImprovementPrOptions
+): Promise<ProposalWorkspaceFeedback | undefined> {
+  if (!opts.store.listProposalOutcomes) return undefined;
+  try {
+    const digest = await buildProposalFeedbackDigest({
+      store: {
+        listProposalOutcomes: (input) =>
+          opts.store.listProposalOutcomes!(input),
+      },
+      workspaceId: opts.workspaceId,
+      now: opts.now?.() ?? new Date(),
+    });
+    return proposalFeedbackDigestToAgentInput(digest);
+  } catch {
+    return undefined;
+  }
 }
 
 function creativeAdTextForVariant(

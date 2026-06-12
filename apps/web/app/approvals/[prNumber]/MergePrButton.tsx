@@ -18,6 +18,7 @@ export interface MergePrButtonProps {
   repoFullName: string;
   expectedHeadSha: string;
   htmlUrl: string | null;
+  rejectionReasons: Array<{ value: string; label: string }>;
 }
 
 interface DecisionResponse {
@@ -36,9 +37,12 @@ export function MergePrButton({
   repoFullName,
   expectedHeadSha,
   htmlUrl,
+  rejectionReasons,
 }: MergePrButtonProps) {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState(rejectionReasons[0]?.value ?? "other");
+  const [rejectionNote, setRejectionNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const router = useRouter();
@@ -102,7 +106,11 @@ export function MergePrButton({
           "Content-Type": "application/json",
           "X-AdDroid-Web-Action": "1",
         },
-        body: JSON.stringify({ expectedHeadSha }),
+        body: JSON.stringify({
+          expectedHeadSha,
+          rejectionReason,
+          rejectionNote,
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as DecisionResponse;
       if (!res.ok || !body.ok) {
@@ -274,6 +282,28 @@ export function MergePrButton({
                 </li>
               ) : null}
             </ul>
+            <label className="field">
+              <span>非承認理由</span>
+              <select
+                value={rejectionReason}
+                onChange={(event) => setRejectionReason(event.target.value)}
+              >
+                {rejectionReasons.map((reason) => (
+                  <option key={reason.value} value={reason.value}>
+                    {reason.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>メモ</span>
+              <textarea
+                value={rejectionNote}
+                onChange={(event) => setRejectionNote(event.target.value)}
+                maxLength={200}
+                rows={3}
+              />
+            </label>
             {inlineError ? (
               <div
                 role="alert"

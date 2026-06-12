@@ -25,6 +25,8 @@ export interface DecidePullRequestApprovalOptions {
   expectedHeadSha?: string;
   mergeMethod?: "merge" | "squash" | "rebase";
   comment?: string;
+  rejectionReason?: string;
+  rejectionNote?: string;
 }
 
 export interface DecidePullRequestApprovalResult {
@@ -125,6 +127,8 @@ export async function decidePullRequestApproval(
             prNumber: pr.number,
             headSha: pr.headSha,
             htmlUrl: pr.htmlUrl,
+            rejectionReason: opts.rejectionReason ?? null,
+            rejectionNote: opts.rejectionNote ?? null,
           } satisfies Prisma.InputJsonValue,
         },
         select: { id: true },
@@ -143,6 +147,8 @@ export async function decidePullRequestApproval(
             decisionSource: opts.decisionSource,
             approvalRecordId: row.id,
             comment: opts.comment?.trim() || null,
+            rejectionReason: opts.rejectionReason ?? null,
+            rejectionNote: opts.rejectionNote ?? null,
           } satisfies Prisma.InputJsonValue,
         },
       });

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  normalizeRejectionReason,
+  sanitizeRejectionNote,
+  type RejectionReason,
+} from "@addroid/queue";
+import {
   ApprovalDecisionError,
   decidePullRequestApproval,
 } from "../../../../../../worker/src/lib/approval-decision-runtime";
@@ -12,6 +17,34 @@ export const dynamic = "force-dynamic";
 interface Body {
   expectedHeadSha?: unknown;
   comment?: unknown;
+  rejectionReason?: unknown;
+  rejectionNote?: unknown;
+}
+
+export type RejectFeedbackParseResult =
+  | {
+      ok: true;
+      rejectionReason: RejectionReason;
+      rejectionNote: string | undefined;
+    }
+  | { ok: false; status: 400; error: string };
+
+export function parseRejectFeedbackPayload(
+  payload: Body
+): RejectFeedbackParseResult {
+  const rejectionReason = normalizeRejectionReason(payload.rejectionReason);
+  if (!rejectionReason) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Reject requests must include a valid rejectionReason.",
+    };
+  }
+  return {
+    ok: true,
+    rejectionReason,
+    rejectionNote: sanitizeRejectionNote(payload.rejectionNote) ?? undefined,
+  };
 }
 
 export async function POST(
@@ -58,6 +91,13 @@ export async function POST(
     typeof payload.comment === "string" && payload.comment.trim().length > 0
       ? payload.comment.trim()
       : undefined;
+  const feedback = parseRejectFeedbackPayload(payload);
+  if (!feedback.ok) {
+    return NextResponse.json(
+      { ok: false, error: feedback.error },
+      { status: feedback.status },
+    );
+  }
   const workspace = await ensureWebWorkspace();
 
   try {
@@ -69,7 +109,11 @@ export async function POST(
       actor: "user:web-ui",
       decisionSource: "web_reject",
       expectedHeadSha,
-      ...(comment ? { comment } : {}),
+      comment:
+        comment ??
+        [feedback.rejectionReason, feedback.rejectionNote].filter(Boolean).join(": "),
+      rejectionReason: feedback.rejectionReason,
+      ...(feedback.rejectionNote ? { rejectionNote: feedback.rejectionNote } : {}),
     });
     return NextResponse.json(result, { status: 200 });
   } catch (err) {

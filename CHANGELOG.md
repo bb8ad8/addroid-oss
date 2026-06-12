@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added — 提案採否トラッキング
+
+- 改善 PR の承認・非承認結果を次回提案へ反映する提案採否フィードバックを追加し、非承認理由の記録、media_buyer ai_run と PR の紐づけ、`/improvements` の採否サマリ表示を追加。
+
 ### Added — 最小 A/B テスト管理
 
 - 同一広告セット内の2広告を比較する最小 A/B テスト管理として `experiments` モデル、`create_experiment` Agent tool、`experiment_evaluate` cron preset、`/experiments` 画面、敗者 PAUSE 提案 PR 作成を追加。

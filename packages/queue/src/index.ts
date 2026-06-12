@@ -234,6 +234,22 @@ export {
 } from "./creative-performance.js";
 
 export {
+  REJECTION_REASON_LABELS_JA,
+  REJECTION_REASONS,
+  buildProposalFeedbackDigest,
+  normalizeRejectionReason,
+  proposalFeedbackDigestToAgentInput,
+  sanitizeRejectionNote,
+  type ProposalFeedbackDigest,
+  type ProposalFeedbackProposal,
+  type ProposalFeedbackStore,
+  type ProposalOutcomeRow,
+  type ProposalOutcomeStats,
+  type ProposalWorkspaceFeedback,
+  type RejectionReason,
+} from "./proposal-feedback.js";
+
+export {
   CreativeQuerySchema,
   PerformanceCompareSchema,
   PerformanceMetricSchema,

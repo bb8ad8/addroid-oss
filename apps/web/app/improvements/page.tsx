@@ -35,6 +35,13 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import {
+  buildProposalFeedbackDigest,
+  REJECTION_REASON_LABELS_JA,
+  REJECTION_REASONS,
+  type ProposalFeedbackDigest,
+  type RejectionReason,
+} from "@addroid/queue";
 import { prisma } from "../../lib/prisma";
 import { Panel } from "../../components/ui/Panel";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -56,6 +63,7 @@ import { formatDateTime, resolveDisplayTimeZone } from "../../lib/datetime";
 import { ensureWebWorkspace } from "../../lib/github-runtime";
 import { getPaginationState, paginationLabel } from "../../lib/pagination";
 import { firstSearchParamOrNull } from "../../lib/search-params";
+import { createPrismaProposalFeedbackStore } from "../../../worker/src/lib/proposal-feedback-runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -670,6 +678,14 @@ function proposalCategoryLabel(value: string): string {
   return labels[value] ?? value.replaceAll("_", " ");
 }
 
+function proposalRejectionReasonLabel(value: string | null): string {
+  if (!value) return "—";
+  if (REJECTION_REASONS.includes(value as RejectionReason)) {
+    return REJECTION_REASON_LABELS_JA[value as RejectionReason];
+  }
+  return value;
+}
+
 function proposalGroupLabel(proposal: ImprovementProposalDetail): string {
   const target = proposal.target.trim();
   return target
@@ -751,6 +767,7 @@ export default async function ImprovementsPage({
   let auditsTotal = 0;
   let schedules: ScheduleRow[] = [];
   let adAccountTimeZones: AdAccountTimeZoneRow[] = [];
+  let proposalFeedbackDigest: ProposalFeedbackDigest | null = null;
   let dbReady = true;
   try {
     const workspace = await ensureWebWorkspace();
@@ -872,6 +889,10 @@ export default async function ImprovementsPage({
         select: { workspaceId: true, key: true, timezoneName: true },
       }),
     ]);
+    proposalFeedbackDigest = await buildProposalFeedbackDigest({
+      store: createPrismaProposalFeedbackStore(prisma),
+      workspaceId: workspace.id,
+    }).catch(() => null);
   } catch {
     dbReady = false;
   }
@@ -942,6 +963,8 @@ export default async function ImprovementsPage({
     "aiRunsPage",
     aiRunsTotal
   );
+  const proposalFeedbackStats = proposalFeedbackDigest?.stats ?? [];
+  const proposalFeedbackRejections = proposalFeedbackDigest?.recentRejections ?? [];
   const timeZoneByAccount = new Map(
     adAccountTimeZones.map((row) => [`${row.workspaceId}:${row.key}`, row.timezoneName])
   );
@@ -1256,6 +1279,79 @@ export default async function ImprovementsPage({
       ),
       className: "tabular",
       headerClassName: "tabular",
+    },
+  ];
+
+  const proposalFeedbackStatsColumns: DataTableColumn<
+    ProposalFeedbackDigest["stats"][number]
+  >[] = [
+    {
+      header: "カテゴリ",
+      cell: (row) => proposalCategoryLabel(row.category),
+    },
+    {
+      header: "承認率",
+      cell: (row) => {
+        const judged = row.approved + row.rejected;
+        return judged > 0 ? `${Math.round((row.approved / judged) * 100)}%` : "—";
+      },
+      className: "tabular mono",
+      headerClassName: "tabular",
+    },
+    {
+      header: "提案",
+      cell: (row) => row.proposed,
+      className: "tabular mono",
+      headerClassName: "tabular",
+    },
+    {
+      header: "承認",
+      cell: (row) => row.approved,
+      className: "tabular mono",
+      headerClassName: "tabular",
+    },
+    {
+      header: "非承認",
+      cell: (row) => row.rejected,
+      className: "tabular mono",
+      headerClassName: "tabular",
+    },
+    {
+      header: "主な理由",
+      cell: (row) =>
+        row.topRejectionReasons.length > 0
+          ? row.topRejectionReasons
+              .map((item) => `${proposalRejectionReasonLabel(item.reason)} (${item.count})`)
+              .join(" / ")
+          : "—",
+    },
+  ];
+
+  const proposalFeedbackRejectionColumns: DataTableColumn<
+    ProposalFeedbackDigest["recentRejections"][number]
+  >[] = [
+    {
+      header: "日時",
+      cell: (row) =>
+        formatDateTime(new Date(row.decidedAt), { timeZone: pageDisplayTimeZone }),
+      className: "tabular mono",
+      headerClassName: "tabular",
+    },
+    {
+      header: "カテゴリ",
+      cell: (row) => proposalCategoryLabel(row.category),
+    },
+    {
+      header: "理由",
+      cell: (row) => proposalRejectionReasonLabel(row.reason),
+    },
+    {
+      header: "提案内容",
+      cell: (row) => row.proposedChange,
+    },
+    {
+      header: "メモ",
+      cell: (row) => row.note ?? "—",
     },
   ];
 
@@ -1587,6 +1683,56 @@ export default async function ImprovementsPage({
             このページは確認専用で、Meta へ直接反映しません。
           </div>
         </div>
+
+        <Panel
+          title="提案の採否サマリ"
+          subtitle={
+            proposalFeedbackDigest
+              ? `直近 ${proposalFeedbackDigest.periodDays} 日の承認・非承認を次回の AI 提案に反映します`
+              : "承認・非承認の履歴があると次回の AI 提案に反映します"
+          }
+        >
+          {!dbReady ? (
+            <EmptyState
+              title="採否サマリを読み出せません"
+              description="接続と健康状態を確認してください。"
+            />
+          ) : proposalFeedbackStats.length === 0 &&
+            proposalFeedbackRejections.length === 0 ? (
+            <EmptyState
+              title="提案の採否履歴はまだありません"
+              description="改善 PR を承認または非承認にすると、カテゴリ別の傾向がここに表示されます。"
+            />
+          ) : (
+            <div style={{ display: "grid", gap: "1rem" }}>
+              <section>
+                <SectionLabel>カテゴリ別</SectionLabel>
+                <DataTable
+                  rows={proposalFeedbackStats}
+                  rowKey={(row) => row.category}
+                  empty={null}
+                  columns={proposalFeedbackStatsColumns}
+                />
+              </section>
+              <section>
+                <SectionLabel>直近の非承認</SectionLabel>
+                <DataTable
+                  rows={proposalFeedbackRejections}
+                  rowKey={(row) =>
+                    `${row.decidedAt}:${row.category}:${row.proposedChange}`
+                  }
+                  empty={
+                    <EmptyState
+                      title="直近の非承認はありません"
+                      description="非承認時の理由とメモは、次回提案の参考情報として扱われます。"
+                    />
+                  }
+                  columns={proposalFeedbackRejectionColumns}
+                />
+              </section>
+            </div>
+          )}
+        </Panel>
 
         <Panel
           title={detailPanelTitle}
