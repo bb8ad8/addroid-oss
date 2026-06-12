@@ -90,6 +90,8 @@ interface SnapshotRow {
   clicks: number;
   spendMicros: bigint;
   conversions: number;
+  frequency: number | { toNumber(): number } | null;
+  linkClicks: number | null;
   source: string;
   createdAt: Date;
 }
@@ -334,6 +336,19 @@ function formatPercent(n: number): string {
 
 function formatFrequency(n: number | null): string {
   return n === null ? "—" : formatNumber(n, 2);
+}
+
+function decimalToNumber(value: number | { toNumber(): number } | null): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "object" && value !== null && typeof value.toNumber === "function") {
+    const n = value.toNumber();
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function formatNullablePercent(value: number | null): string {
+  return value === null ? "—" : formatPercent(value);
 }
 
 function formatDelta(value: string | undefined): string {
@@ -682,6 +697,8 @@ export default async function ReportsDailyPage({
           clicks: true,
           spendMicros: true,
           conversions: true,
+          frequency: true,
+          linkClicks: true,
           source: true,
           createdAt: true,
         },
@@ -862,6 +879,38 @@ export default async function ReportsDailyPage({
       cell: (row) => (
         <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
           {formatNumber(row.clicks)}
+        </span>
+      ),
+      className: "tabular",
+      headerClassName: "tabular",
+    },
+    {
+      header: "CTR",
+      cell: (row) => (
+        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+          {formatNullablePercent(row.impressions > 0 ? (row.clicks / row.impressions) * 100 : null)}
+        </span>
+      ),
+      className: "tabular",
+      headerClassName: "tabular",
+    },
+    {
+      header: "CPM",
+      cell: (row) => (
+        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+          {row.impressions > 0
+            ? formatNumber((microsToMajor(row.spendMicros) / row.impressions) * 1000, 2)
+            : "—"}
+        </span>
+      ),
+      className: "tabular",
+      headerClassName: "tabular",
+    },
+    {
+      header: "Frequency",
+      cell: (row) => (
+        <span className="tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+          {formatFrequency(decimalToNumber(row.frequency))}
         </span>
       ),
       className: "tabular",

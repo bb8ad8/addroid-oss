@@ -80,6 +80,14 @@ export function createPrismaDailyReportSnapshotStore(
         clicks: input.clicks,
         spendMicros: input.spendMicros,
         conversions: input.conversions,
+        reach: input.reach ?? null,
+        frequency: input.frequency ?? null,
+        linkClicks: input.linkClicks ?? null,
+        videoThruPlays: input.videoThruPlays ?? null,
+        video3SecViews: input.video3SecViews ?? null,
+        qualityRanking: input.qualityRanking ?? null,
+        engagementRateRanking: input.engagementRateRanking ?? null,
+        conversionRateRanking: input.conversionRateRanking ?? null,
         source: input.source,
         ...(input.hierarchyId
           ? { hierarchyId: input.hierarchyId }
@@ -100,6 +108,14 @@ export function createPrismaDailyReportSnapshotStore(
           clicks: data.clicks,
           spendMicros: data.spendMicros,
           conversions: data.conversions,
+          reach: data.reach,
+          frequency: data.frequency,
+          linkClicks: data.linkClicks,
+          videoThruPlays: data.videoThruPlays,
+          video3SecViews: data.video3SecViews,
+          qualityRanking: data.qualityRanking,
+          engagementRateRanking: data.engagementRateRanking,
+          conversionRateRanking: data.conversionRateRanking,
           source: data.source,
           hierarchyId: data.hierarchyId,
           raw: data.raw,
@@ -293,6 +309,8 @@ function simulateRows(
     conversions: baseConversions,
     spendMicros: BigInt(baseSpendMajor) * 1_000_000n,
     frequency: baseFrequency,
+    reach: Math.floor(baseImpressions / baseFrequency),
+    linkClicks: Math.floor(baseClicks * 0.72),
   };
 
   // 階層: 1 campaign → 1 adset → 1 ad (this implementation では十分)
@@ -308,6 +326,8 @@ function simulateRows(
     spendMicros:
       (BigInt(baseSpendMajor) * 1_000_000n * 80n) / 100n,
     frequency: baseFrequency,
+    reach: Math.floor((baseImpressions * 0.8) / baseFrequency),
+    linkClicks: Math.floor(baseClicks * 0.58),
   };
   const adset: DailyReportInsightsRow = {
     nodeType: "adset",
@@ -319,6 +339,8 @@ function simulateRows(
     spendMicros:
       (BigInt(baseSpendMajor) * 1_000_000n * 60n) / 100n,
     frequency: baseFrequency,
+    reach: Math.floor((baseImpressions * 0.6) / baseFrequency),
+    linkClicks: Math.floor(baseClicks * 0.43),
   };
   const ad: DailyReportInsightsRow = {
     nodeType: "ad",
@@ -330,6 +352,13 @@ function simulateRows(
     spendMicros:
       (BigInt(baseSpendMajor) * 1_000_000n * 40n) / 100n,
     frequency: baseFrequency,
+    reach: Math.floor((baseImpressions * 0.4) / baseFrequency),
+    linkClicks: Math.floor(baseClicks * 0.29),
+    videoThruPlays: Math.floor(baseImpressions * 0.08),
+    video3SecViews: Math.floor(baseImpressions * 0.18),
+    qualityRanking: "average",
+    engagementRateRanking: "average",
+    conversionRateRanking: "average",
   };
 
   const rows: DailyReportInsightsRow[] = [];

@@ -201,6 +201,14 @@ model PerformanceSnapshot {
   clicks      Int      @default(0)
   spendMicros BigInt   @default(0) // Meta は通貨マイクロ単位での扱いが安全
   conversions Int      @default(0)
+  reach       Int?
+  frequency   Decimal? @db.Decimal(8, 4)
+  linkClicks  Int?
+  videoThruPlays Int?
+  video3SecViews Int?
+  qualityRanking String?
+  engagementRateRanking String?
+  conversionRateRanking String?
   raw         Json? // 取得元レスポンスの保存 (再計算用)。retention: 90d。
   source      String   @default("meta_ads_cli")
   createdAt   DateTime @default(now())

@@ -52,9 +52,16 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "spend",
       "impressions",
       "clicks",
+      "reach",
+      "inline_link_clicks",
       "conversions",
       "actions",
       "frequency",
+      "video_thruplay_watched_actions",
+      "video_3_sec_watched_actions",
+      "quality_ranking",
+      "engagement_rate_ranking",
+      "conversion_rate_ranking",
       "campaign_id",
       "campaign_name",
       "adset_id",
@@ -190,7 +197,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "insights",
       "get",
       "--fields",
-      this.compatibleFields().join(","),
+      this.compatibleFields(input.level).join(","),
       "--since",
       input.metricDate,
       "--until",
@@ -245,7 +252,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       });
   }
 
-  private compatibleFields(): string[] {
+  private compatibleFields(level: DailyReportNodeType): string[] {
     const allowed = new Set([
       "spend",
       "impressions",
@@ -253,9 +260,15 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "ctr",
       "cpc",
       "reach",
+      "inline_link_clicks",
       "conversions",
       "actions",
       "frequency",
+      "video_thruplay_watched_actions",
+      "video_3_sec_watched_actions",
+      "quality_ranking",
+      "engagement_rate_ranking",
+      "conversion_rate_ranking",
       "campaign_id",
       "campaign_name",
       "adset_id",
@@ -265,7 +278,10 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "account_id",
       "account_name",
     ]);
-    return this.fields.filter((field) => allowed.has(field));
+    return fieldsForInsightsLevel(
+      this.fields.filter((field) => allowed.has(field)),
+      level
+    );
   }
 }
 
@@ -289,9 +305,16 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
       "spend",
       "impressions",
       "clicks",
+      "reach",
+      "inline_link_clicks",
       "conversions",
       "actions",
       "frequency",
+      "video_thruplay_watched_actions",
+      "video_3_sec_watched_actions",
+      "quality_ranking",
+      "engagement_rate_ranking",
+      "conversion_rate_ranking",
       "campaign_id",
       "campaign_name",
       "adset_id",
@@ -347,7 +370,7 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
         const rows = await fetchInsights({
           accessToken: lease.accessToken,
           adAccountId,
-          fields: this.fields,
+          fields: fieldsForInsightsLevel(this.fields, level),
           level,
           timeRange: { since: req.metricDate, until: req.metricDate },
         });
@@ -359,7 +382,7 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
           const priorRows = await fetchInsights({
             accessToken: lease.accessToken,
             adAccountId,
-            fields: this.fields,
+            fields: fieldsForInsightsLevel(this.fields, level),
             level,
             timeRange: { since: priorDate, until: priorDate },
           });
@@ -520,9 +543,34 @@ function parseInsightsPayload(
       clicks: integerField(row, "clicks"),
       conversions: extractConversions(row, conversionActionTypes),
       frequency: nullableNumberField(row, "frequency"),
+      reach: nullableIntegerField(row, "reach"),
+      linkClicks: nullableIntegerField(row, "inline_link_clicks"),
+      videoThruPlays: extractActionValue(
+        row.video_thruplay_watched_actions,
+        "video_thruplay_watched_actions"
+      ),
+      video3SecViews: extractActionValue(
+        row.video_3_sec_watched_actions,
+        "video_3_sec_watched_actions"
+      ),
+      qualityRanking: stringField(row, "quality_ranking"),
+      engagementRateRanking: stringField(row, "engagement_rate_ranking"),
+      conversionRateRanking: stringField(row, "conversion_rate_ranking"),
     });
   }
   return out;
+}
+
+export function fieldsForInsightsLevel(
+  fields: readonly string[],
+  level: DailyReportNodeType
+): string[] {
+  const rankingFields = new Set([
+    "quality_ranking",
+    "engagement_rate_ranking",
+    "conversion_rate_ranking",
+  ]);
+  return fields.filter((field) => level === "ad" || !rankingFields.has(field));
 }
 
 function parseJson(text: string): unknown {
@@ -597,6 +645,23 @@ function extractConversions(
   return Math.floor(total);
 }
 
+export function extractActionValue(
+  actions: unknown,
+  actionType: string
+): number | null {
+  if (!Array.isArray(actions)) return null;
+  let total = 0;
+  let found = false;
+  for (const action of actions) {
+    if (!isRecord(action)) continue;
+    const type = stringField(action, "action_type");
+    if (type !== actionType) continue;
+    total += numberField(action, "value");
+    found = true;
+  }
+  return found ? Math.max(0, Math.floor(total)) : null;
+}
+
 function stringField(row: Record<string, unknown>, key: string): string | null {
   const value = row[key];
   if (typeof value === "string" && value.trim()) return value.trim();
@@ -620,6 +685,11 @@ function nullableNumberField(row: Record<string, unknown>, key: string): number 
 
 function integerField(row: Record<string, unknown>, key: string): number {
   return Math.max(0, Math.floor(numberField(row, key)));
+}
+
+function nullableIntegerField(row: Record<string, unknown>, key: string): number | null {
+  const value = nullableNumberField(row, key);
+  return value === null ? null : Math.max(0, Math.floor(value));
 }
 
 function majorToMicros(value: number): bigint {

@@ -1054,6 +1054,9 @@ export interface AnalystAgentMetrics {
   cpc?: number;
   cpa?: number;
   frequency?: number;
+  reach?: number;
+  cpm?: number;
+  qualityRankingSummary?: string;
 }
 
 export interface AnalystAgentInput {
@@ -1093,6 +1096,8 @@ export const ANALYST_AGENT_SYSTEM_PROMPT = [
   "You are the AdDroid OSS analyst agent.",
   "Summarize a Meta Ads daily_report period and surface top improvement candidates.",
   "You do not propose budget or targeting changes — that is the media_buyer agent's role.",
+  "When frequency, reach, CPM, or quality ranking signals are present, use them to distinguish audience fatigue, delivery cost pressure, and creative quality issues.",
+  "Treat ranking diagnostics as supporting evidence only; keep deterministic KPI math in the provided metrics.",
   "",
   "Respond with a single JSON object using exactly these fields:",
   "  commentary:       string (1 short paragraph, plain prose)",

@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MetaCliDailyReportInsightsProvider } from "../meta-cli-insights-runtime.js";
+import {
+  extractActionValue,
+  fieldsForInsightsLevel,
+  MetaCliDailyReportInsightsProvider,
+} from "../meta-cli-insights-runtime.js";
 import type { MetaCliExecutionResult, MetaCliInvocation } from "@addroid/meta-adapter";
 
 test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report rows", async () => {
@@ -21,8 +25,16 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
                 spend: "123.45",
                 impressions: "1000",
                 clicks: "50",
+                reach: "800",
+                inline_link_clicks: "40",
                 actions: [{ action_type: "purchase", value: "2" }],
                 frequency: "1.2",
+                video_thruplay_watched_actions: [
+                  { action_type: "video_thruplay_watched_actions", value: "11" },
+                ],
+                video_3_sec_watched_actions: [
+                  { action_type: "video_3_sec_watched_actions", value: "21" },
+                ],
               },
             ],
           }),
@@ -68,6 +80,10 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
   assert.equal(result.current[0]!.nodeKey, "cmp_1");
   assert.equal(result.current[0]!.spendMicros, 123450000n);
   assert.equal(result.current[0]!.conversions, 2);
+  assert.equal(result.current[0]!.reach, 800);
+  assert.equal(result.current[0]!.linkClicks, 40);
+  assert.equal(result.current[0]!.videoThruPlays, 11);
+  assert.equal(result.current[0]!.video3SecViews, 21);
   assert.equal(invocations[1]!.adAccountId, "act_123");
   assert.deepEqual(invocations[1]!.args.slice(0, 5), [
     "--output",
@@ -76,6 +92,32 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
     "insights",
     "get",
   ]);
+});
+
+test("fieldsForInsightsLevel requests ranking diagnostics only at ad level", () => {
+  const fields = [
+    "spend",
+    "quality_ranking",
+    "engagement_rate_ranking",
+    "conversion_rate_ranking",
+  ];
+  assert.deepEqual(fieldsForInsightsLevel(fields, "campaign"), ["spend"]);
+  assert.deepEqual(fieldsForInsightsLevel(fields, "ad"), fields);
+});
+
+test("extractActionValue handles missing, multiple, and numeric-string actions", () => {
+  assert.equal(extractActionValue(null, "video_3_sec_watched_actions"), null);
+  assert.equal(
+    extractActionValue(
+      [
+        { action_type: "other", value: "100" },
+        { action_type: "video_3_sec_watched_actions", value: "12.7" },
+        { action_type: "video_3_sec_watched_actions", value: 2 },
+      ],
+      "video_3_sec_watched_actions"
+    ),
+    14
+  );
 });
 
 test("MetaCliDailyReportInsightsProvider keeps account totals when optional breakdowns hit a rate limit", async () => {

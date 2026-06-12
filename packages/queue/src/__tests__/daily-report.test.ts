@@ -407,9 +407,16 @@ test("runDailyReportOnce stores 4-level snapshots and emits AI commentary + top 
   assert.equal(summary.deltas.clicks, "+10.0%");
   // Account currency surfaced
   assert.equal(summary.currency, "JPY");
+  const adUpsert = store.upsertCalls.find((c) => c.nodeType === "ad" && c.metricDate === "2026-05-02");
+  assert.equal(adUpsert?.frequency, 1.5);
   // analyst input received the snapshot ids of all 4 current rows
   const analystCall = analyst.calls[0]!;
   assert.equal(analystCall.snapshotIds.length, 4);
+  assert.equal(analystCall.current.ctr, 1);
+  assert.equal(analystCall.current.cpc, 9.090909);
+  assert.equal(analystCall.current.cpa, 200);
+  assert.equal(analystCall.current.frequency, 1.5);
+  assert.equal(analystCall.current.cpm, 90.909091);
   // top improvements truncated to <= 3 (we returned 1)
   assert.equal(summary.topImprovements.length, 1);
   assert.equal(summary.topImprovements[0]!.target, "cmp_1");

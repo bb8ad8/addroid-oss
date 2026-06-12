@@ -199,6 +199,13 @@ export {
 } from "./daily-report.js";
 
 export {
+  deriveMetrics,
+  microsToMajorUnit,
+  type DerivedMetrics,
+  type SnapshotMetricInput,
+} from "./metrics.js";
+
+export {
   combineApprovalClassifications,
   combineApprovalDecisions,
   evaluateApprovalPolicy,

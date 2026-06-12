@@ -34,6 +34,7 @@ import {
   selectAccountKpiSet,
   type BreakdownsPolicy,
 } from "./analytics.js";
+import { deriveMetrics } from "./metrics.js";
 
 // ---------------------------------------------------------------------
 // Insights provider — Meta CLI / Mock / Fixture が満たす境界
@@ -60,6 +61,17 @@ export interface DailyReportInsightsRow {
   conversions: number;
   /** 平均露出回数。Meta は "frequency" を float で返す。null 可。 */
   frequency?: number | null;
+  /** リーチ数。Meta は "reach" を整数文字列で返すことがある。 */
+  reach?: number | null;
+  /** リンククリック数。Meta field は inline_link_clicks。 */
+  linkClicks?: number | null;
+  /** 動画 ThruPlay。動画なし / 未取得なら null。 */
+  videoThruPlays?: number | null;
+  /** 3秒動画再生。動画なし / 未取得なら null。 */
+  video3SecViews?: number | null;
+  qualityRanking?: string | null;
+  engagementRateRanking?: string | null;
+  conversionRateRanking?: string | null;
 }
 
 export interface DailyReportInsightsRequest {
@@ -105,6 +117,14 @@ export interface PerformanceSnapshotUpsertInput {
   clicks: number;
   spendMicros: bigint;
   conversions: number;
+  reach?: number | null;
+  frequency?: number | null;
+  linkClicks?: number | null;
+  videoThruPlays?: number | null;
+  video3SecViews?: number | null;
+  qualityRanking?: string | null;
+  engagementRateRanking?: string | null;
+  conversionRateRanking?: string | null;
   raw?: JsonValue | null;
   source: string;
 }
@@ -173,6 +193,9 @@ export interface DailyReportAnalystInput {
     cpc?: number;
     cpa?: number;
     frequency?: number;
+    reach?: number;
+    cpm?: number;
+    qualityRankingSummary?: string;
   };
   prior?: {
     spend: number;
@@ -183,6 +206,9 @@ export interface DailyReportAnalystInput {
     cpc?: number;
     cpa?: number;
     frequency?: number;
+    reach?: number;
+    cpm?: number;
+    qualityRankingSummary?: string;
   };
   snapshotIds: string[];
 }
@@ -387,6 +413,14 @@ export async function runDailyReportOnce(
       clicks: row.clicks,
       spendMicros: row.spendMicros,
       conversions: row.conversions,
+      reach: row.reach ?? null,
+      frequency: row.frequency ?? null,
+      linkClicks: row.linkClicks ?? null,
+      videoThruPlays: row.videoThruPlays ?? null,
+      video3SecViews: row.video3SecViews ?? null,
+      qualityRanking: row.qualityRanking ?? null,
+      engagementRateRanking: row.engagementRateRanking ?? null,
+      conversionRateRanking: row.conversionRateRanking ?? null,
       raw: insightsRowToRaw(row),
       source: insights.source,
     });
@@ -403,6 +437,14 @@ export async function runDailyReportOnce(
       clicks: row.clicks,
       spendMicros: row.spendMicros,
       conversions: row.conversions,
+      reach: row.reach ?? null,
+      frequency: row.frequency ?? null,
+      linkClicks: row.linkClicks ?? null,
+      videoThruPlays: row.videoThruPlays ?? null,
+      video3SecViews: row.video3SecViews ?? null,
+      qualityRanking: row.qualityRanking ?? null,
+      engagementRateRanking: row.engagementRateRanking ?? null,
+      conversionRateRanking: row.conversionRateRanking ?? null,
       raw: insightsRowToRaw(row),
       source: insights.source,
     });
@@ -612,8 +654,16 @@ function kpiSetToAnalystMetrics(k: DailyReportKpiSet): {
   ctr: number;
   cpc: number;
   cpa: number;
+  cpm: number;
   frequency?: number;
 } {
+  const derived = deriveMetrics({
+    impressions: k.impressions,
+    clicks: k.clicks,
+    spendMicros: BigInt(Math.round(k.spend * 1_000_000)),
+    conversions: k.conversions,
+    frequency: k.frequency,
+  });
   const out: {
     spend: number;
     impressions: number;
@@ -622,15 +672,17 @@ function kpiSetToAnalystMetrics(k: DailyReportKpiSet): {
     ctr: number;
     cpc: number;
     cpa: number;
+    cpm: number;
     frequency?: number;
   } = {
     spend: k.spend,
     impressions: k.impressions,
     clicks: k.clicks,
     conversions: k.conversions,
-    ctr: k.ctr,
-    cpc: k.cpc,
-    cpa: k.cpa,
+    ctr: derived.ctr === null ? k.ctr : round6(derived.ctr * 100),
+    cpc: derived.cpcMajor === null ? k.cpc : round6(derived.cpcMajor),
+    cpa: derived.cpaMajor === null ? k.cpa : round6(derived.cpaMajor),
+    cpm: derived.cpmMajor === null ? k.cpm : round6(derived.cpmMajor),
   };
   if (typeof k.frequency === "number") out.frequency = k.frequency;
   return out;
@@ -646,6 +698,13 @@ function insightsRowToRaw(row: DailyReportInsightsRow): JsonValue {
     impressions: row.impressions,
     clicks: row.clicks,
     conversions: row.conversions,
+    reach: row.reach ?? null,
+    linkClicks: row.linkClicks ?? null,
+    videoThruPlays: row.videoThruPlays ?? null,
+    video3SecViews: row.video3SecViews ?? null,
+    qualityRanking: row.qualityRanking ?? null,
+    engagementRateRanking: row.engagementRateRanking ?? null,
+    conversionRateRanking: row.conversionRateRanking ?? null,
     frequency:
       typeof row.frequency === "number" && Number.isFinite(row.frequency)
         ? row.frequency
