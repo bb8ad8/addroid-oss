@@ -4,6 +4,7 @@
 // 各 check は副作用なし (read-only) で、actionable な hint を必ず返す。
 
 import { spawnSync } from "node:child_process";
+import path from "node:path";
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import {
@@ -13,6 +14,7 @@ import {
   validateEncryptionKey,
   type AddroidPaths,
 } from "@addroid/config";
+import { resolveRepoRoot } from "./paths.js";
 
 export type CheckState = "ok" | "warn" | "error" | "skipped";
 
@@ -465,4 +467,80 @@ export async function checkPrismaConnect(
       /* ignore */
     }
   }
+}
+
+/**
+ * DB の実スキーマと `prisma/schema.prisma` の差分 (drift) を検知する read-only check。
+ *
+ * 非エンジニアの既存ユーザーが `git pull` で新しいバージョンを取り込んだあと、
+ * `addroid update` (= `prisma db push`) を実行し忘れると、DB に新しいカラム/テーブルが
+ * 無いまま web/worker が起動し、実行時に分かりにくいエラー (例: `creatives.genes` 不在) に
+ * 突き当たる。これを起動前に検知し、`addroid update` への誘導を返す。
+ *
+ * 判定には `prisma migrate diff --exit-code` を使う (Empty=0 / Error=1 / Not empty=2)。
+ * prisma バイナリはリポジトリの node_modules に含まれるため、self-host 環境で利用できる。
+ */
+export async function checkSchemaDrift(env: NodeJS.ProcessEnv = process.env): Promise<CheckResult> {
+  if (!env.DATABASE_URL) {
+    return {
+      name: "schema-drift",
+      state: "skipped",
+      message: "DATABASE_URL 未設定のためスキップ。",
+    };
+  }
+  let repoRoot: string;
+  try {
+    repoRoot = resolveRepoRoot();
+  } catch (err) {
+    return {
+      name: "schema-drift",
+      state: "skipped",
+      message: `リポジトリルートを特定できないためスキップ: ${(err as Error).message}`,
+    };
+  }
+  const prismaBin = path.join(repoRoot, "node_modules", ".bin", "prisma");
+  const schemaPath = path.join(repoRoot, "prisma", "schema.prisma");
+  const r = spawnSync(
+    prismaBin,
+    [
+      "migrate",
+      "diff",
+      "--from-url",
+      env.DATABASE_URL,
+      "--to-schema-datamodel",
+      schemaPath,
+      "--exit-code",
+    ],
+    { cwd: repoRoot, env, encoding: "utf8", timeout: 30_000 }
+  );
+  if (r.error && (r.error as NodeJS.ErrnoException).code === "ENOENT") {
+    return {
+      name: "schema-drift",
+      state: "skipped",
+      message: "prisma バイナリが見つからないためスキップ。",
+      hint: "`npm install` を実行してください。",
+    };
+  }
+  if (r.status === 0) {
+    return {
+      name: "schema-drift",
+      state: "ok",
+      message: "DB スキーマは最新です。",
+    };
+  }
+  if (r.status === 2) {
+    return {
+      name: "schema-drift",
+      state: "warn",
+      message: "DB スキーマがコードより古い可能性があります (未反映の変更あり)。",
+      hint: "`addroid update` を実行して DB スキーマを最新化してください。",
+    };
+  }
+  // status 1 (= prisma diff 自体のエラー)。接続不可は checkPrismaConnect 側で報告されるため warn 止まり。
+  return {
+    name: "schema-drift",
+    state: "warn",
+    message: "スキーマ差分を判定できませんでした。",
+    hint: ((r.stderr ?? "").trim().split("\n")[0] || "`addroid doctor` の他項目を確認してください。"),
+  };
 }
