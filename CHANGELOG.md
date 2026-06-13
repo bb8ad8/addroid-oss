@@ -44,6 +44,33 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ---
 
+## [Unreleased]
+
+### Added — 既存環境の簡単アップデート
+
+- `addroid update` コマンドを追加。`git pull` で新しいバージョンを取り込んだあと、
+  これ 1 つで Prisma クライアント再生成 (`db:generate`) と DB スキーマ反映 (`db:push`) を
+  実行する。新機能はすべて nullable カラム / default / optional フィールドで追加されるため
+  既存データを保持したまま追従でき、破壊的変更を検出した場合のみ停止して
+  `addroid backup` → `addroid update --force` を案内する (fail-closed)。
+- `addroid doctor` に `schema-drift` チェックを追加。`prisma migrate diff --exit-code` で
+  DB スキーマとコードの乖離を検知し、未反映の変更があれば `addroid update` を案内する。
+- 既存ユーザー向けのアップデート手順を [`docs/UPDATE.md`](docs/UPDATE.md) に新設。
+
+### Added — リリースノートの GitHub 自動発行
+
+- `v*` タグの push をトリガーに GitHub Release を自動発行する `release` ワークフロー
+  ([`.github/workflows/release.yml`](.github/workflows/release.yml)) を追加。Release 本文は
+  `scripts/extract-changelog.mjs` が CHANGELOG の該当セクションから抽出するため、CHANGELOG を
+  唯一の source of truth に保ったまま「何が変わったか」が Releases ページで一目で分かる。
+  ハイフンを含むタグは prerelease として発行する。
+- マージ済み PR をラベル別に整形する GitHub 自動リリースノート設定
+  ([`.github/release.yml`](.github/release.yml)) を追加。
+- CHANGELOG 抽出スクリプトと単体テスト (`npm run test:scripts`) を追加。
+- [`docs/RELEASE.md`](docs/RELEASE.md) Step 8 を「タグ push → 自動発行」に更新。
+
+---
+
 ## [0.1.0] - 2026-06-03
 
 > AdDroid OSS の初回 OSS 公開リリース。`addroid init` / `addroid start` / `addroid status` /

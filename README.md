@@ -389,6 +389,7 @@ addroid/
 | `npm install` | ワークスペース全体の依存解決 |
 | `npm run addroid -- init` | repository checkout の初回 bootstrap。完了後は `addroid <command>` を直接利用 |
 | `addroid init` | command wrapper 作成後の再初期化・状態確認。既存 credential は保持 |
+| `addroid update` | 既存環境の更新。Prisma クライアント再生成 + DB スキーマ反映 + 健全性チェックを 1 コマンドで。手順は [`docs/UPDATE.md`](docs/UPDATE.md) |
 | `addroid chat` | 通常利用の入口。自然文でレポート、予算確認、改善提案、入稿チェック、接続確認を依頼 |
 | `addroid start` | 常駐サービスをインストールして起動・修復。Web UI と worker はサービス内で動作 |
 | `addroid stop` | 常駐サービスを停止 |
@@ -421,6 +422,7 @@ addroid/
 | ドキュメント | 内容 |
 |---|---|
 | [`docs/SETUP.md`](docs/SETUP.md) | ローカルセットアップ手順、PostgreSQL 準備、環境変数、`addroid doctor` の挙動 |
+| [`docs/UPDATE.md`](docs/UPDATE.md) | 既存環境の更新手順 (`addroid update`)、スキーマドリフト警告、破壊的変更時の `--force` フロー |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | プロセスモデル、モノレポ境界、Prisma スキーマ、cron preset、Apply / Activate split |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | localhost-only / outbound-only 前提、token 暗号化、Meta / Slack / LLM トークン取扱、OSS リリース衛生 |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | よくある失敗モード (DB / `ENCRYPTION_KEY` / ポート競合 / OAuth / outbound 接続 / Slack Socket Mode / LLM 未設定) |

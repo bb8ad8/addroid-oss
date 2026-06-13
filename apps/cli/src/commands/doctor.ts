@@ -15,6 +15,7 @@ import {
   checkPlatform,
   checkPostgresVersion,
   checkPrismaConnect,
+  checkSchemaDrift,
   checkSecretsLocal,
   summarizeOverall,
   type CheckResult,
@@ -31,6 +32,7 @@ export async function runDoctor(_args: string[]): Promise<number> {
   checks.push(await checkConfigFile(paths));
   checks.push(await checkSecretsLocal(paths));
   checks.push(await checkPrismaConnect());
+  checks.push(await checkSchemaDrift());
 
   const overall = summarizeOverall(checks);
   printChecks(checks, overall);
