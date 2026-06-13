@@ -27,12 +27,14 @@ import {
 interface UpdateOptions {
   force: boolean;
   skipChecks: boolean;
+  skipInstall: boolean;
 }
 
 function parseArgs(args: string[]): UpdateOptions {
   return {
     force: args.includes("--force"),
     skipChecks: args.includes("--skip-checks"),
+    skipInstall: args.includes("--skip-install"),
   };
 }
 
@@ -85,16 +87,36 @@ export async function runUpdate(args: string[]): Promise<number> {
     return 1;
   }
 
-  // 2) CLI バンドルを再ビルド (グローバル `addroid` を最新コードに追従させる)。
+  // 2) 依存関係を更新 (`git pull` で増減した npm 依存を node_modules に反映)。
+  //
+  // これを `addroid update` に含めることで、更新フローは `git pull` → `addroid update` の
+  // 2 手で完結する。新しいコードが新しい依存を必要とする場合に備え、CLI 再ビルドや Prisma
+  // 生成より前に実行する。`--skip-install` で省略できる (依存が変わっていないと分かっている時)。
+  if (!opts.skipInstall) {
+    out.push("1/5 依存関係を更新しています (npm install)…");
+    process.stdout.write(out.join("\n") + "\n");
+    out.length = 0;
+    const install = run("npm", ["install"], repoRoot, env, 600_000);
+    if (install.status !== 0) {
+      process.stderr.write(
+        `依存関係の更新 (npm install) に失敗しました:\n${tail(install.stderr || install.stdout)}\n`
+      );
+      return 1;
+    }
+  } else {
+    out.push("1/5 依存関係の更新をスキップしました (--skip-install)。");
+    process.stdout.write(out.join("\n") + "\n");
+    out.length = 0;
+  }
+
+  // 3) CLI バンドルを再ビルド (グローバル `addroid` を最新コードに追従させる)。
   //
   // グローバル `addroid` は事前ビルド済みの dist バンドルを実行するため、`git pull` で
   // 新しいソースを取り込んでも再ビルドするまで反映されない (新コマンド・新挙動が見えない)。
   // ここで再ビルドしておくことで、update を 1 回走らせれば以降は `addroid <command>` が
   // 常に最新になる。ビルドは repo checkout (dev 依存あり) 前提のため、失敗しても致命とは
   // 扱わず警告に留め、スキーマ反映を優先する (純粋な global-only install への配慮)。
-  out.push("1/4 CLI を再ビルドしています…");
-  process.stdout.write(out.join("\n") + "\n");
-  out.length = 0;
+  process.stdout.write("2/5 CLI を再ビルドしています…\n");
   const buildCli = run("npm", ["run", "build", "--workspace", "apps/cli"], repoRoot, env, 180_000);
   if (buildCli.status !== 0) {
     process.stdout.write(
@@ -102,8 +124,8 @@ export async function runUpdate(args: string[]): Promise<number> {
     );
   }
 
-  // 3) Prisma client 再生成 (新しいカラム/モデルに型を追従させる)。
-  process.stdout.write("2/4 Prisma クライアントを再生成しています…\n");
+  // 4) Prisma client 再生成 (新しいカラム/モデルに型を追従させる)。
+  process.stdout.write("3/5 Prisma クライアントを再生成しています…\n");
   const generate = run("npm", ["run", "db:generate"], repoRoot, env, 120_000);
   if (generate.status !== 0) {
     process.stderr.write(
@@ -112,8 +134,8 @@ export async function runUpdate(args: string[]): Promise<number> {
     return 1;
   }
 
-  // 4) スキーマ反映 (additive を既定、破壊的変更は --force が無ければ停止)。
-  process.stdout.write("3/4 データベーススキーマを反映しています…\n");
+  // 5) スキーマ反映 (additive を既定、破壊的変更は --force が無ければ停止)。
+  process.stdout.write("4/5 データベーススキーマを反映しています…\n");
   const pushArgs = ["run", "db:push"];
   if (opts.force) pushArgs.push("--", "--accept-data-loss");
   const push = run("npm", pushArgs, repoRoot, env, 180_000);
@@ -142,8 +164,8 @@ export async function runUpdate(args: string[]): Promise<number> {
     return 1;
   }
 
-  // 5) 反映後の健全性チェック (drift が解消したかを含む)。
-  process.stdout.write("4/4 健全性をチェックしています…\n\n");
+  // 6) 反映後の健全性チェック (drift が解消したかを含む)。
+  process.stdout.write("5/5 健全性をチェックしています…\n\n");
   if (!opts.skipChecks) {
     const checks: CheckResult[] = [];
     checks.push(checkDatabaseUrl());

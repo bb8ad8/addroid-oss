@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `addroid update` が CLI バンドルも再ビルドするようにし、`git pull` 後の新コマンド・新挙動が
   `addroid <command>` (グローバル) に反映されるようにした。初回のみ `npm run addroid -- update`
   でブートストラップすれば、以降は `addroid update` だけで最新化できる。
+- `addroid update` が依存更新 (`npm install`) も実行するようにし、更新フローを
+  `git pull` → `addroid update` の 2 手に簡素化した (`--skip-install` で省略可)。
 
 ### Added — リリースノートの GitHub 自動発行
 
