@@ -85,6 +85,11 @@ const FIXTURE_REPO_NAME = "addroid-browser-fixture";
 const FIXTURE_CREATIVE_ID = "browser-preview-creative";
 const FIXTURE_ACCOUNT_KEY = "browser-preview";
 
+// CreativePreview の Stories タブをクリックして切り替える predicate。waitFor で繰り返し評価し、
+// hydration が完了してクリックが効くと aria-selected が "true" になって解決する。
+const STORIES_TAB_SWITCH_EXPR =
+  '(function(){var s=Array.prototype.slice.call(document.querySelectorAll("button")).find(function(b){return (b.textContent||"").trim()==="Stories";});if(!s)return false;if(s.getAttribute("aria-selected")==="true")return true;s.click();return false;})()';
+
 // SideNav が描画する全リンク先。これらは layout 経由で全ページに含まれる
 // はずなので、欠けていれば「nav が壊れている」と判定する。
 // 並びは apps/web/components/SideNav.tsx の `groups` と同じグループ順
@@ -1125,6 +1130,12 @@ async function browserFlowApprovals(page, recordResult) {
   recordResult("browser-approvals-detail-renders-file-path-b", detailRender.hasFixturePathB, "fixture path config/fixture-new.yaml が描画されていません");
   recordResult("browser-approvals-detail-renders-merge-button", detailRender.hasMergeButton, "Web UI Merge ボタンが描画されていません");
 
+  // Stories タブはクライアント側 hydration 後にのみ切り替わる。navigate() は readyState=complete
+  // までしか待たないため、hydration / 再描画前に同期で aria-selected を読むと false になりうる。
+  // poll ごとにクリックし、次の poll で aria-selected を確認することで hydration / flush race を吸収する。
+  await page
+    .waitFor(STORIES_TAB_SWITCH_EXPR, { timeoutMs: 8_000 })
+    .catch(() => undefined);
   const approvalPreview = await page.eval(`
     ${HELPER_FNS}
     const text = document.body.innerText || "";
@@ -1151,6 +1162,9 @@ async function browserFlowApprovals(page, recordResult) {
   recordResult("browser-approvals-preview-placeholder-copy", approvalPreview.hasPlaceholderCopy, "copy 無し creative の placeholder が表示されていません");
 
   await page.navigate(`${page.baseUrl}/creatives/${FIXTURE_CREATIVE_ID}`);
+  await page
+    .waitFor(STORIES_TAB_SWITCH_EXPR, { timeoutMs: 8_000 })
+    .catch(() => undefined);
   const creativeDetailPreview = await page.eval(`
     ${HELPER_FNS}
     const text = document.body.innerText || "";
