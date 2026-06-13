@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `addroid doctor` に `schema-drift` チェックを追加。`prisma migrate diff --exit-code` で
   DB スキーマとコードの乖離を検知し、未反映の変更があれば `addroid update` を案内する。
 - 既存ユーザー向けのアップデート手順を [`docs/UPDATE.md`](docs/UPDATE.md) に新設。
+- `addroid update` が CLI バンドルも再ビルドするようにし、`git pull` 後の新コマンド・新挙動が
+  `addroid <command>` (グローバル) に反映されるようにした。初回のみ `npm run addroid -- update`
+  でブートストラップすれば、以降は `addroid update` だけで最新化できる。
 
 ### Added — リリースノートの GitHub 自動発行
 
