@@ -1,7 +1,7 @@
 {
   "name": "addroid-oss",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "AdDroid OSS — self-hostable, GitOps-driven Meta ad operations console.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/bb8ad8/addroid-oss#readme",

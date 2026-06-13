@@ -1,6 +1,6 @@
 {
   "name": "@addroid/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AdDroid OSS CLI — local-only operator console for GitOps-driven Meta ad operations.",
   "type": "module",
   "license": "Apache-2.0",

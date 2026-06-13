@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-13
+
 ### Added — 提案採否トラッキング
 
 - 改善 PR の承認・非承認結果を次回提案へ反映する提案採否フィードバックを追加し、非承認理由の記録、media_buyer ai_run と PR の紐づけ、`/improvements` の採否サマリ表示を追加。
