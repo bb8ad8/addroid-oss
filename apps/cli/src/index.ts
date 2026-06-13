@@ -34,6 +34,8 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "init":
       return (await import("./commands/init.js")).runInit(rest);
+    case "update":
+      return (await import("./commands/update.js")).runUpdate(rest);
     case "start":
       return (await import("./commands/service-public.js")).runStartCommand(rest);
     case "stop":
@@ -102,6 +104,7 @@ function printHelp() {
         "Commands:",
         "  chat      Interactive natural-language agent chat",
         "  init      First-run setup and missing configuration guide",
+        "  update    Update an existing install (regenerate client, apply DB schema)",
         "  start     Start or repair resident services",
         "  stop      Stop resident services",
         "  open      Open the Web UI or print its URL",
@@ -132,6 +135,7 @@ function printHelp() {
       "Commands:",
       "  chat      自然文で操作する対話型 agent chat",
       "  init      初期設定・不足設定の案内",
+      "  update    既存環境の更新 (クライアント再生成・DB スキーマ反映)",
       "  start     常駐サービスを起動・修復",
       "  stop      常駐サービスを停止",
       "  open      Web UI を開く / URL を表示",
