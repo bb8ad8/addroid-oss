@@ -247,21 +247,33 @@ npm view "@addroid/cli@${NEW_VERSION}" version dist-tags
 > - `--dry-run` は CI で常に走り、`npm publish` の前段検証はすでに自動化されている。
 > - 人間が `npm whoami` / 2FA でゲートする運用が AdDroid OSS の契約 (本書 §10)。
 
-### Step 8. git tag + GitHub Release を発行
+### Step 8. git tag を push → GitHub Release は自動発行
+
+タグを push するだけで、`.github/workflows/release.yml` が CHANGELOG の該当セクションを
+本文とした GitHub Release を**自動で発行**します。利用者は Releases ページで「何が変わったか」を
+一目で確認でき、リポジトリを Watch していれば更新通知も受け取れます。
 
 ```bash
 git tag -a "v${NEW_VERSION}" -m "AdDroid OSS v${NEW_VERSION}"
 git push origin "v${NEW_VERSION}"
+# → release ワークフローが起動し、CHANGELOG [${NEW_VERSION}] を本文に Release を作成する。
+#   ハイフンを含むタグ (例 v0.2.0-rc.1) は prerelease として作成される。
 ```
 
-GitHub Release は `gh` CLI または Web UI から発行します。Release notes は CHANGELOG の
-該当セクションをそのままコピーします。
+Release 本文は `scripts/extract-changelog.mjs` が CHANGELOG から抽出するため、
+**CHANGELOG が唯一の source of truth**として保たれます。発行内容は手元でも確認できます。
 
 ```bash
-gh release create "v${NEW_VERSION}" \
-  --title "AdDroid OSS v${NEW_VERSION}" \
-  --notes-file <(awk "/^## \\[${NEW_VERSION}\\]/,/^## \\[/" CHANGELOG.md | sed '$d')
+node scripts/extract-changelog.mjs "${NEW_VERSION}"   # Release 本文のプレビュー
 ```
+
+> 既存タグから手動で再発行したい場合は、GitHub の **Actions → release → Run workflow** から
+> タグ名を指定して dispatch します (本文は再抽出され、既存 Release があれば上書きされます)。
+>
+> PR ごとの一覧 (どの PR が含まれるか) が欲しい場合は、Release 編集画面の
+> 「Generate release notes」を押すと `.github/release.yml` の分類設定でラベル別に整形されます。
+> このワークフローは **GitHub Release の発行のみ**を行い、npm publish は Step 7 の手動操作のままです
+> (理由は §10)。
 
 ### Step 9. インストール smoke
 

@@ -1,0 +1,39 @@
+# AdDroid OSS — GitHub 自動生成リリースノートの分類設定。
+#
+# GitHub の Release 画面で「Generate release notes」を押したとき、または
+# Release 作成 API で auto-notes を有効にしたときに、マージ済み PR を以下の
+# カテゴリへラベルベースで振り分ける。CHANGELOG (手書きの source of truth) を
+# 補完し、「どの PR が含まれるか」を機械的に一覧化するために使う。
+#
+# 運用:
+#   - 主要な Release 本文は CHANGELOG セクション (release ワークフローが本文化) を使う。
+#   - PR ごとの一覧が必要なときは、この設定に基づく auto-notes を併用する。
+#   - PR には enhancement / bug / documentation / dependencies 等のラベルを付ける
+#     (Keep a Changelog の Added / Fixed 等に対応)。
+
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - question
+    authors:
+      - dependabot
+  categories:
+    - title: "✨ 追加 (Added)"
+      labels:
+        - enhancement
+    - title: "🐛 修正 (Fixed)"
+      labels:
+        - bug
+    - title: "📝 ドキュメント (Documentation)"
+      labels:
+        - documentation
+    - title: "⬆️ 依存更新 (Dependencies)"
+      labels:
+        - dependencies
+        - github_actions
+    - title: "🔧 その他の変更 (Other)"
+      labels:
+        - "*"

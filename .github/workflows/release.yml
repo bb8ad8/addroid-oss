@@ -1,0 +1,113 @@
+# AdDroid OSS — Release publishing workflow.
+#
+# 目的:
+#   `v*` タグの push をトリガーに、対応する CHANGELOG セクションを本文とした
+#   GitHub Release を自動発行する。これにより「何が変わったか」が GitHub の
+#   Releases ページで一目で分かり、利用者は Watch → Releases で更新通知を受け取れる。
+#
+# 設計方針 (docs/RELEASE.md と整合):
+#   - CHANGELOG.md を source of truth とし、`scripts/extract-changelog.mjs` で
+#     該当バージョンのセクションを抽出して Release 本文にする。
+#   - このワークフローは npm publish を行わない。実 publish は人間承認のうえ手動で実施する
+#     (RELEASE.md §10「なぜ CI から実 publish しないのか」)。GitHub Release の発行のみを担う。
+#   - プレリリース (例 v0.2.0-rc.1 のようにハイフンを含む版) は prerelease として作成する。
+#   - 正規リポジトリでのみ実行し、fork では走らせない。
+#
+# 使い方:
+#   1) docs/RELEASE.md の手順で CHANGELOG を確定し、リリース commit を main に merge する。
+#   2) `git tag -a vX.Y.Z -m "AdDroid OSS vX.Y.Z" && git push origin vX.Y.Z`
+#      → 本ワークフローが GitHub Release を自動発行する。
+#   既存タグから手動で再発行したい場合は Actions タブから workflow_dispatch で tag を指定する。
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "発行する既存タグ (例: v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: publish github release
+    # 正規リポジトリのみ。fork に同名タグを打っても誤発行しない。
+    if: ${{ github.repository_owner != '' && github.event.repository.fork == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::タグを解決できませんでした。" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          PRERELEASE=false
+          case "$VERSION" in
+            *-*) PRERELEASE=true ;;
+          esac
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Setup Node.js (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          if ! node scripts/extract-changelog.mjs "${{ steps.tag.outputs.version }}" > release-notes.md; then
+            echo "::error::CHANGELOG.md に [${{ steps.tag.outputs.version }}] セクションがありません。リリース前に CHANGELOG を確定してください (docs/RELEASE.md Step 3)。" >&2
+            exit 1
+          fi
+          echo "---- release notes preview ----"
+          cat release-notes.md
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
+        run: |
+          PREFLAG=""
+          if [ "$PRERELEASE" = "true" ]; then PREFLAG="--prerelease"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG は既に存在します。本文を更新します。"
+            gh release edit "$TAG" \
+              --title "AdDroid OSS $TAG" \
+              --notes-file release-notes.md $PREFLAG
+          else
+            gh release create "$TAG" \
+              --title "AdDroid OSS $TAG" \
+              --notes-file release-notes.md \
+              --verify-tag $PREFLAG
+          fi
