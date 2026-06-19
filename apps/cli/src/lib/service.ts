@@ -4,8 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { ensureAddroidPaths, type AddroidPaths } from "@addroid/config";
+import { ensureAddroidPaths, resolveAddroidPaths, type AddroidPaths } from "@addroid/config";
 import { resolveRepoRoot } from "./paths.js";
+import type { UpMode } from "./processes.js";
 
 const execFileAsync = promisify(execFile) as (
   file: string,
@@ -25,6 +26,11 @@ export interface AddroidServiceStatus {
   detail?: string;
   unitPath?: string;
   pid?: number;
+  mode?: UpMode;
+}
+
+export interface AddroidServiceOptions {
+  mode?: UpMode | null;
 }
 
 interface CommandResult {
@@ -130,11 +136,16 @@ async function systemdUserAvailable(): Promise<boolean> {
   return result.code === 0;
 }
 
-async function resolveCliProgramArguments(repoRoot: string): Promise<string[]> {
+export async function resolveCliProgramArguments(
+  repoRoot: string,
+  mode: UpMode = "shared"
+): Promise<string[]> {
+  const withMode = (args: string[]): string[] =>
+    mode === "separate-worker" ? [...args, "--separate-worker"] : args;
   const distEntry = path.join(repoRoot, "apps/cli/dist/index.mjs");
   try {
     await fs.access(distEntry);
-    return [process.execPath, distEntry, "up"];
+    return withMode([process.execPath, distEntry, "up"]);
   } catch {
     // source checkout without dist; fall through to tsx source entry
   }
@@ -144,7 +155,7 @@ async function resolveCliProgramArguments(repoRoot: string): Promise<string[]> {
   try {
     await fs.access(tsxBin);
     await fs.access(srcEntry);
-    return [process.execPath, tsxBin, srcEntry, "up"];
+    return withMode([process.execPath, tsxBin, srcEntry, "up"]);
   } catch {
     // last-resort current entrypoint
   }
@@ -153,11 +164,45 @@ async function resolveCliProgramArguments(repoRoot: string): Promise<string[]> {
   if (!currentEntry) {
     throw new Error("現在の addroid entrypoint を解決できません。先に CLI を build してください。");
   }
-  return [process.execPath, ...process.execArgv, path.resolve(currentEntry), "up"];
+  return withMode([process.execPath, ...process.execArgv, path.resolve(currentEntry), "up"]);
 }
 
-async function writeServiceRunner(paths: AddroidPaths, repoRoot: string): Promise<void> {
-  const programArgs = await resolveCliProgramArguments(repoRoot);
+export function resolveServiceUpMode(
+  opts: AddroidServiceOptions = {},
+  env: NodeJS.ProcessEnv = process.env
+): UpMode {
+  const raw = opts.mode ?? env.ADDROID_SERVICE_UP_MODE ?? "shared";
+  const normalized = String(raw).trim().toLowerCase();
+  if (normalized === "shared") return "shared";
+  if (normalized === "separate-worker" || normalized === "separate_worker" || normalized === "separate") {
+    return "separate-worker";
+  }
+  throw new Error("ADDROID_SERVICE_UP_MODE must be 'shared' or 'separate-worker'.");
+}
+
+async function readInstalledServiceMode(paths: AddroidPaths): Promise<UpMode | undefined> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(paths.serviceEnvFile, "utf8");
+  } catch {
+    return undefined;
+  }
+  const match = raw.match(/^export\s+ADDROID_SERVICE_UP_MODE=(['"]?)([^'"\n]+)\1\s*$/m);
+  if (!match?.[2]) return undefined;
+  try {
+    return resolveServiceUpMode({ mode: match[2] as UpMode });
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeServiceRunner(
+  paths: AddroidPaths,
+  repoRoot: string,
+  opts: AddroidServiceOptions = {}
+): Promise<void> {
+  const mode = resolveServiceUpMode(opts);
+  const programArgs = await resolveCliProgramArguments(repoRoot, mode);
   const nodeBin = programArgs[0] ?? process.execPath;
   const pidFile = paths.pidFile;
   const envLines = [
@@ -166,6 +211,7 @@ async function writeServiceRunner(paths: AddroidPaths, repoRoot: string): Promis
     `export HOME=${shellSingleQuote(os.homedir())}`,
     `export PATH=${shellSingleQuote(process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin")}`,
     "export ADDROID_SERVICE=1",
+    `export ADDROID_SERVICE_UP_MODE=${shellSingleQuote(mode)}`,
     "",
   ].join("\n");
   await fs.writeFile(paths.serviceEnvFile, envLines, { encoding: "utf8", mode: 0o600 });
@@ -239,11 +285,13 @@ function buildSystemdUnit(paths: AddroidPaths, repoRoot: string): string {
   ].join("\n");
 }
 
-export async function installAddroidService(): Promise<AddroidServiceStatus> {
+export async function installAddroidService(
+  opts: AddroidServiceOptions = {}
+): Promise<AddroidServiceStatus> {
   const platform = resolveServicePlatform();
   const paths = await ensureAddroidPaths();
   const repoRoot = resolveRepoRoot();
-  await writeServiceRunner(paths, repoRoot);
+  await writeServiceRunner(paths, repoRoot, opts);
 
   if (platform === "launchd") {
     const plistPath = resolveLaunchAgentPath();
@@ -290,9 +338,11 @@ export async function installAddroidService(): Promise<AddroidServiceStatus> {
   };
 }
 
-export async function startAddroidService(): Promise<AddroidServiceStatus> {
+export async function startAddroidService(
+  opts: AddroidServiceOptions = {}
+): Promise<AddroidServiceStatus> {
   const status = await getAddroidServiceStatus();
-  if (!status.installed) return await installAddroidService();
+  if (!status.installed) return await installAddroidService(opts);
   if (status.platform === "launchd") {
     const plistPath = resolveLaunchAgentPath();
     const domain = resolveGuiDomain();
@@ -338,6 +388,8 @@ export async function getAddroidServiceStatus(): Promise<AddroidServiceStatus> {
   if (platform === "launchd") {
     const unitPath = resolveLaunchAgentPath();
     const installed = await fs.access(unitPath).then(() => true, () => false);
+    const paths = resolveAddroidPaths();
+    const mode = installed ? await readInstalledServiceMode(paths) : undefined;
     const result = await runCommand("launchctl", ["print", `${resolveGuiDomain()}/${ADDROID_SERVICE_LABEL}`]);
     const printed = parseLaunchdPrint(result.stdout);
     const running = result.code === 0 && printed.state === "running";
@@ -352,6 +404,7 @@ export async function getAddroidServiceStatus(): Promise<AddroidServiceStatus> {
       installed,
       running,
       unitPath,
+      ...(mode ? { mode } : {}),
       ...(running && printed.pid ? { pid: printed.pid } : {}),
       ...(details.length > 0 ? { detail: details.join("; ") } : {}),
     };
@@ -359,12 +412,15 @@ export async function getAddroidServiceStatus(): Promise<AddroidServiceStatus> {
   if (platform === "systemd") {
     const unitPath = resolveSystemdUnitPath();
     const installed = await fs.access(unitPath).then(() => true, () => false);
+    const paths = resolveAddroidPaths();
+    const mode = installed ? await readInstalledServiceMode(paths) : undefined;
     if (!(await systemdUserAvailable())) {
       return {
         platform,
         installed,
         running: false,
         unitPath,
+        ...(mode ? { mode } : {}),
         detail: isWsl()
           ? "systemd user service が利用できません。WSL2 の systemd 設定を確認してください。"
           : "systemd user service が利用できません。",
@@ -378,6 +434,7 @@ export async function getAddroidServiceStatus(): Promise<AddroidServiceStatus> {
       installed,
       running: active.stdout.trim() === "active",
       unitPath,
+      ...(mode ? { mode } : {}),
       ...(Number.isFinite(pid) && pid > 0 ? { pid } : {}),
       ...(active.code !== 0 && installed ? { detail: active.stdout.trim() || active.stderr.trim() } : {}),
     };
@@ -394,6 +451,7 @@ export function formatServiceStatus(status: AddroidServiceStatus): string[] {
   return [
     `  service       : ${status.installed ? "installed" : "not installed"} (${status.platform})`,
     `  running       : ${status.running ? "yes" : "no"}`,
+    ...(status.mode ? [`  up mode       : ${status.mode}`] : []),
     ...(status.pid ? [`  pid           : ${status.pid}`] : []),
     ...(status.unitPath ? [`  unit          : ${status.unitPath}`] : []),
     ...(status.detail ? [`  detail        : ${status.detail}`] : []),
