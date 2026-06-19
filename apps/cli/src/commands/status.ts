@@ -5,7 +5,7 @@
 
 import { resolveAddroidLanguage, resolveAddroidPaths, readAddroidConfig } from "@addroid/config";
 import net from "node:net";
-import { isProcessAlive, readUpState } from "../lib/processes.js";
+import { formatRss, isProcessAlive, readProcessRssKb, readUpState } from "../lib/processes.js";
 import { formatServiceStatus, getAddroidServiceStatus } from "../lib/service.js";
 
 interface DoctorRow {
@@ -90,6 +90,8 @@ export async function runStatus(args: string[]): Promise<number> {
     lines.push(
       `  parent pid    : ${state.parentPid} ${parentAlive ? "[ ok  ]" : "[stopped]"}`
     );
+    const parentRss = parentAlive ? formatRss(await readProcessRssKb(state.parentPid)) : null;
+    if (parentRss) lines.push(`  parent RSS    : ${parentRss}`);
     if (state.mode === "shared") {
       const webLabel = webFailed
         ? `worker only (web-failed) ${parentAlive ? "[degraded]" : "[stopped]"}`
@@ -110,6 +112,8 @@ export async function runStatus(args: string[]): Promise<number> {
           state.workerPid ? (workerAlive ? "[ ok  ]" : "[stopped]") : "[absent]"
         }`
       );
+      const workerRss = workerAlive ? formatRss(await readProcessRssKb(state.workerPid)) : null;
+      if (workerRss) lines.push(`  worker RSS    : ${workerRss}`);
     }
   }
   lines.push("");
