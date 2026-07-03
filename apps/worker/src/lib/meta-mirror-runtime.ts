@@ -226,7 +226,7 @@ async function fetchGraphRows(
             "campaign_id",
             "adset_id",
             "updated_time",
-            "creative{id,name,title,body,call_to_action_type,object_url,template_url,object_story_spec,thumbnail_url,image_url,video_id,effective_object_story_id,instagram_user_id,instagram_permalink_url}",
+            "creative{id,name,title,body,call_to_action_type,object_url,template_url,object_story_spec,thumbnail_url,image_url,video_id,effective_object_story_id,instagram_user_id,instagram_permalink_url,asset_feed_spec}",
           ].join(",");
   let url = new URL(`https://graph.facebook.com/${META_GRAPH_API_VERSION}/${accountId}/${edge}`);
   url.searchParams.set("fields", fields);
@@ -482,29 +482,37 @@ function insightsFieldsForLevel(level: InsightsLevel): string {
   return `${identity},spend,impressions,clicks,actions,date_start,date_stop`;
 }
 
-function normalizeMetaCreative(rawAd: Record<string, unknown>): MetaCreativeSpec | null {
+export function normalizeMetaCreative(rawAd: Record<string, unknown>): MetaCreativeSpec | null {
   const rawCreative = isRecord(rawAd.creative) ? rawAd.creative : null;
   if (!rawCreative) return null;
   const objectStorySpec = isRecord(rawCreative.object_story_spec)
     ? rawCreative.object_story_spec
+    : {};
+  // Advantage+ / dynamic creatives keep copy in asset_feed_spec (arrays), not object_story_spec.
+  // Fall back to it after object_story_spec so existing creatives keep their current behaviour.
+  const assetFeedSpec = isRecord(rawCreative.asset_feed_spec)
+    ? rawCreative.asset_feed_spec
     : {};
   const headline = firstString([
     readString(rawCreative.title),
     readNestedString(objectStorySpec, ["link_data", "name"]),
     readNestedString(objectStorySpec, ["video_data", "title"]),
     readNestedString(objectStorySpec, ["template_data", "name"]),
+    firstAssetFeedString(assetFeedSpec, "titles", "text"),
   ]);
   const primaryText = firstString([
     readString(rawCreative.body),
     readNestedString(objectStorySpec, ["link_data", "message"]),
     readNestedString(objectStorySpec, ["video_data", "message"]),
     readNestedString(objectStorySpec, ["template_data", "message"]),
+    firstAssetFeedString(assetFeedSpec, "bodies", "text"),
   ]);
   const callToAction = firstString([
     readString(rawCreative.call_to_action_type),
     readNestedString(objectStorySpec, ["link_data", "call_to_action", "type"]),
     readNestedString(objectStorySpec, ["video_data", "call_to_action", "type"]),
     readNestedString(objectStorySpec, ["template_data", "call_to_action", "type"]),
+    firstAssetFeedString(assetFeedSpec, "call_to_action_types"),
   ]);
   const linkUrl = firstString([
     readString(rawCreative.object_url),
@@ -514,6 +522,7 @@ function normalizeMetaCreative(rawAd: Record<string, unknown>): MetaCreativeSpec
     readNestedString(objectStorySpec, ["video_data", "call_to_action", "value", "link"]),
     readNestedString(objectStorySpec, ["template_data", "link"]),
     readNestedString(objectStorySpec, ["template_data", "call_to_action", "value", "link"]),
+    firstAssetFeedString(assetFeedSpec, "link_urls", "website_url"),
   ]);
   const out: MetaCreativeSpec = {
     key: readString(rawCreative.id) ?? undefined,
@@ -603,6 +612,29 @@ function majorToMicros(value: number): bigint {
 
 function firstString(values: Array<string | null>): string | null {
   return values.find((value): value is string => value !== null) ?? null;
+}
+
+// Reads the first non-empty string from an asset_feed_spec array field.
+// When itemKey is given, each element is an object (e.g. titles/bodies -> {text},
+// link_urls -> {website_url}); otherwise elements are plain strings
+// (e.g. call_to_action_types -> ["LEARN_MORE"]).
+function firstAssetFeedString(
+  assetFeedSpec: unknown,
+  arrayKey: string,
+  itemKey?: string,
+): string | null {
+  if (!isRecord(assetFeedSpec)) return null;
+  const arr = assetFeedSpec[arrayKey];
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) {
+    const value = itemKey
+      ? isRecord(item)
+        ? readString(item[itemKey])
+        : null
+      : readString(item);
+    if (value) return value;
+  }
+  return null;
 }
 
 function readNestedString(value: unknown, path: string[]): string | null {

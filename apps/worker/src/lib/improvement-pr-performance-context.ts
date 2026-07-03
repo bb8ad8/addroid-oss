@@ -735,6 +735,29 @@ function readNestedRawString(value: unknown, path: string[]): string | null {
   return typeof current === "string" && current.trim() ? current.trim() : null;
 }
 
+// Reads the first non-empty string from raw.creative.asset_feed_spec[arrayKey].
+// Advantage+ / dynamic creatives keep their copy here (titles/bodies -> {text},
+// link_urls -> {website_url}) instead of object_story_spec. When itemKey is omitted
+// the array holds plain strings (e.g. call_to_action_types).
+function readAssetFeedRawString(
+  value: unknown,
+  arrayKey: string,
+  itemKey?: string,
+): string | null {
+  const raw = isRecord(value) && isRecord(value.raw) ? value.raw : null;
+  const creative = raw && isRecord(raw.creative) ? raw.creative : null;
+  const assetFeedSpec =
+    creative && isRecord(creative.asset_feed_spec) ? creative.asset_feed_spec : null;
+  if (!assetFeedSpec) return null;
+  const arr = assetFeedSpec[arrayKey];
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) {
+    const candidate = itemKey ? (isRecord(item) ? item[itemKey] : null) : item;
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return null;
+}
+
 function readStringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -744,7 +767,7 @@ function readHierarchyContext(value: unknown): Array<Record<string, unknown>> {
   return value.hierarchyContext.filter(isRecord);
 }
 
-function extractCreativeSnippet(value: unknown):
+export function extractCreativeSnippet(value: unknown):
   | ImprovementPrCreativeNodeContext["creative"]
   | null {
   if (!isRecord(value)) return null;
@@ -772,7 +795,8 @@ function extractCreativeSnippet(value: unknown):
       readNestedRawString(value, ["raw", "creative", "title"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "link_data", "name"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "video_data", "title"]) ??
-      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "name"]),
+      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "name"]) ??
+      readAssetFeedRawString(value, "titles", "text"),
     primaryText:
       readSpecString(creative, "primaryText") ??
       readSpecString(value, "primaryText") ??
@@ -781,6 +805,7 @@ function extractCreativeSnippet(value: unknown):
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "link_data", "message"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "video_data", "message"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "message"]) ??
+      readAssetFeedRawString(value, "bodies", "text") ??
       null,
     callToAction:
       readSpecString(creative, "callToAction") ??
@@ -788,7 +813,8 @@ function extractCreativeSnippet(value: unknown):
       readNestedRawString(value, ["raw", "creative", "call_to_action_type"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "link_data", "call_to_action", "type"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "video_data", "call_to_action", "type"]) ??
-      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "call_to_action", "type"]),
+      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "call_to_action", "type"]) ??
+      readAssetFeedRawString(value, "call_to_action_types"),
     linkUrl:
       readSpecString(creative, "linkUrl") ??
       readSpecString(value, "linkUrl") ??
@@ -798,7 +824,8 @@ function extractCreativeSnippet(value: unknown):
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "link_data", "call_to_action", "value", "link"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "video_data", "call_to_action", "value", "link"]) ??
       readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "link"]) ??
-      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "call_to_action", "value", "link"]),
+      readNestedRawString(value, ["raw", "creative", "object_story_spec", "template_data", "call_to_action", "value", "link"]) ??
+      readAssetFeedRawString(value, "link_urls", "website_url"),
     pageId:
       readSpecString(creative, "pageId") ??
       readSpecString(value, "pageId") ??
