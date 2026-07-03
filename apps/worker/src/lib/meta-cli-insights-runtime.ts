@@ -58,7 +58,6 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -265,7 +264,6 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -311,7 +309,6 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -570,7 +567,28 @@ export function fieldsForInsightsLevel(
     "engagement_rate_ranking",
     "conversion_rate_ranking",
   ]);
-  return fields.filter((field) => level === "ad" || !rankingFields.has(field));
+  // ブレイクダウン識別子はその粒度以上のレベルでのみ有効。
+  // 例: campaign_id を level=account で要求すると Meta Graph が (#100) で 400 を返す。
+  const levelRank: Record<DailyReportNodeType, number> = {
+    account: 0,
+    campaign: 1,
+    adset: 2,
+    ad: 3,
+  };
+  const fieldMinRank: Record<string, number> = {
+    campaign_id: 1,
+    campaign_name: 1,
+    adset_id: 2,
+    adset_name: 2,
+    ad_id: 3,
+    ad_name: 3,
+  };
+  return fields.filter((field) => {
+    if (level !== "ad" && rankingFields.has(field)) return false;
+    const minRank = fieldMinRank[field];
+    if (minRank !== undefined && levelRank[level] < minRank) return false;
+    return true;
+  });
 }
 
 function parseJson(text: string): unknown {
