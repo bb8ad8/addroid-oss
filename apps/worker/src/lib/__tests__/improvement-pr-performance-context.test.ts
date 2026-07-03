@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PrismaClient } from "@addroid/db";
-import { loadRecentPerformanceSnapshotContext } from "../improvement-pr-performance-context.js";
+import {
+  extractCreativeSnippet,
+  loadRecentPerformanceSnapshotContext,
+} from "../improvement-pr-performance-context.js";
 
 test("loadRecentPerformanceSnapshotContext uses yesterday-based 7d window and avoids double counting hierarchy levels", async () => {
   let queryArgs: unknown = null;
@@ -294,3 +297,51 @@ function row(
           },
   };
 }
+
+test("extractCreativeSnippet reads copy from raw.creative.asset_feed_spec (Advantage+/dynamic)", () => {
+  const snippet = extractCreativeSnippet({
+    raw: {
+      creative: {
+        id: "1065086112754429",
+        object_story_spec: {
+          page_id: "1098186850054003",
+          instagram_user_id: "17841414792475688",
+        },
+        asset_feed_spec: {
+          titles: [{ text: "社長のXを、裏方が伸ばす。" }],
+          bodies: [{ text: 'フォロワーの数よりも、"誰に届くか"が大切です。' }],
+          call_to_action_types: ["LEARN_MORE"],
+          link_urls: [{ website_url: "https://urakata.no-wave.jp/" }],
+        },
+      },
+    },
+  });
+
+  assert.ok(snippet, "snippet should not be null");
+  assert.equal(snippet?.headline, "社長のXを、裏方が伸ばす。");
+  assert.equal(snippet?.primaryText, 'フォロワーの数よりも、"誰に届くか"が大切です。');
+  assert.equal(snippet?.callToAction, "LEARN_MORE");
+  assert.equal(snippet?.linkUrl, "https://urakata.no-wave.jp/");
+});
+
+test("extractCreativeSnippet keeps object_story_spec copy (no regression)", () => {
+  const snippet = extractCreativeSnippet({
+    raw: {
+      creative: {
+        id: "c-2",
+        object_story_spec: {
+          link_data: {
+            name: "既存ヘッドライン",
+            message: "既存の本文メッセージ",
+          },
+        },
+        asset_feed_spec: {
+          bodies: [{ text: "asset_feed の本文（使われないはず）" }],
+        },
+      },
+    },
+  });
+
+  assert.equal(snippet?.headline, "既存ヘッドライン");
+  assert.equal(snippet?.primaryText, "既存の本文メッセージ");
+});
