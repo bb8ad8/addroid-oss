@@ -81,6 +81,16 @@ export class OpenAIImageProvider implements ImageProvider {
     const requestIds: string[] = [];
     const assets: ImageGeneratedAsset[] = [];
 
+    // OpenAI gpt-image は 1024x1024 / 1536x1024 / 1024x1536 のみ許可 (各辺 16 の倍数)。
+    // 広告用ネイティブ寸法 (1080x1080 等) はそのままだと (#) invalid size で弾かれるため、
+    // 最寄りのアスペクト比の許可サイズにスナップして生成する (下流で配置寸法へリサイズ)。
+    const snapToOpenAISize = (w: number, h: number): string => {
+      const ratio = w / h;
+      if (ratio > 1.2) return "1536x1024";
+      if (ratio < 0.83) return "1024x1536";
+      return "1024x1024";
+    };
+
     for (const cond of normalizedConditions) {
       const prompt = buildPrompt(req.prompt, cond);
       const response = req.referenceImages?.length
@@ -88,7 +98,7 @@ export class OpenAIImageProvider implements ImageProvider {
             apiKey,
             model,
             prompt,
-            size: `${cond.width}x${cond.height}`,
+            size: snapToOpenAISize(cond.width, cond.height),
             outputFormat: cond.format ?? "png",
             referenceImages: req.referenceImages,
           })
@@ -96,7 +106,7 @@ export class OpenAIImageProvider implements ImageProvider {
             apiKey,
             model,
             prompt,
-            size: `${cond.width}x${cond.height}`,
+            size: snapToOpenAISize(cond.width, cond.height),
             outputFormat: cond.format ?? "png",
           });
       if (response.requestId) requestIds.push(response.requestId);
