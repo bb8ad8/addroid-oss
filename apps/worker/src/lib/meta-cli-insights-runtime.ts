@@ -58,7 +58,9 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions removed: Meta Insights API no longer accepts this
+      // as a fields parameter and returns HTTP 400. Use actions[action_type=video_view]
+      // as a fallback instead. See Issue #40.
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -265,7 +267,8 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions removed: Meta Insights API no longer accepts this
+      // as a fields parameter and returns HTTP 400. See Issue #40.
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -311,7 +314,9 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions removed: Meta Insights API no longer accepts this
+      // as a fields parameter and returns HTTP 400. Use actions[action_type=video_view]
+      // as a fallback instead. See Issue #40.
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -549,10 +554,13 @@ function parseInsightsPayload(
         row.video_thruplay_watched_actions,
         "video_thruplay_watched_actions"
       ),
-      video3SecViews: extractActionValue(
-        row.video_3_sec_watched_actions,
-        "video_3_sec_watched_actions"
-      ),
+      // Prefer the legacy dedicated field if present (CLI runner backward compat),
+      // otherwise fall back to actions[action_type=video_view] since
+      // video_3_sec_watched_actions was removed from the Meta Insights API fields
+      // parameter and now causes HTTP 400. See Issue #40.
+      video3SecViews:
+        extractActionValue(row.video_3_sec_watched_actions, "video_3_sec_watched_actions") ??
+        extractActionValue(row.actions, "video_view"),
       qualityRanking: stringField(row, "quality_ranking"),
       engagementRateRanking: stringField(row, "engagement_rate_ranking"),
       conversionRateRanking: stringField(row, "conversion_rate_ranking"),

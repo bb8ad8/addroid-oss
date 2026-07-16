@@ -27,13 +27,15 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
                 clicks: "50",
                 reach: "800",
                 inline_link_clicks: "40",
-                actions: [{ action_type: "purchase", value: "2" }],
+                // actions includes video_view for video3SecViews fallback (Issue #40:
+                // video_3_sec_watched_actions removed from Meta Insights API fields)
+                actions: [
+                  { action_type: "purchase", value: "2" },
+                  { action_type: "video_view", value: "21" },
+                ],
                 frequency: "1.2",
                 video_thruplay_watched_actions: [
                   { action_type: "video_thruplay_watched_actions", value: "11" },
-                ],
-                video_3_sec_watched_actions: [
-                  { action_type: "video_3_sec_watched_actions", value: "21" },
                 ],
               },
             ],
@@ -83,6 +85,7 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
   assert.equal(result.current[0]!.reach, 800);
   assert.equal(result.current[0]!.linkClicks, 40);
   assert.equal(result.current[0]!.videoThruPlays, 11);
+  // video3SecViews now falls back to actions[action_type=video_view] (Issue #40)
   assert.equal(result.current[0]!.video3SecViews, 21);
   assert.equal(invocations[1]!.adAccountId, "act_123");
   assert.deepEqual(invocations[1]!.args.slice(0, 5), [
@@ -92,6 +95,13 @@ test("MetaCliDailyReportInsightsProvider parses CLI JSON rows into daily report 
     "insights",
     "get",
   ]);
+  // video_3_sec_watched_actions must not appear in the fields sent to the CLI
+  // (it is no longer a valid Meta Insights API field and causes HTTP 400; Issue #40)
+  const fieldsArg = invocations[1]!.args[invocations[1]!.args.indexOf("--fields") + 1] ?? "";
+  assert.ok(
+    !fieldsArg.split(",").includes("video_3_sec_watched_actions"),
+    "video_3_sec_watched_actions must not be in the fields list"
+  );
 });
 
 test("fieldsForInsightsLevel requests ranking diagnostics only at ad level", () => {
@@ -118,6 +128,20 @@ test("extractActionValue handles missing, multiple, and numeric-string actions",
     ),
     14
   );
+  // Verify the video_view fallback used for video3SecViews since Issue #40 removed
+  // video_3_sec_watched_actions from the Meta Insights API fields parameter.
+  assert.equal(
+    extractActionValue(
+      [
+        { action_type: "purchase", value: "5" },
+        { action_type: "video_view", value: "33" },
+      ],
+      "video_view"
+    ),
+    33
+  );
+  // When neither dedicated field nor actions are present, result is null.
+  assert.equal(extractActionValue([], "video_view"), null);
 });
 
 test("MetaCliDailyReportInsightsProvider keeps account totals when optional breakdowns hit a rate limit", async () => {
