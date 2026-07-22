@@ -216,7 +216,12 @@ export class OctokitGithubAdapter implements GithubAdapter {
       isPrivate: visibility === "private",
       defaultBranch,
     });
-    const files = buildBootstrapTemplateFiles(input);
+    // gh CLI 由来の OAuth token は workflow scope を持たないため、
+    // .github/workflows/ を含む tree 作成は GitHub が 404 で拒否する。
+    // Phase A では CI 検証 workflow を除外し、workflow scope 取得後に手動追加する。
+    const files = buildBootstrapTemplateFiles(input).filter(
+      (f) => !f.path.startsWith(".github/workflows/")
+    );
     const commit = await api.commitTemplateFiles({
       owner: repo.owner,
       repo: repo.name,
@@ -450,6 +455,21 @@ interface OctokitLike {
   };
 }
 
+async function retryOn404<T>(fn: () => Promise<T>, attempts = 5, delayMs = 2000): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 404) throw err;
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 class OctokitApiClient implements GithubApiClient {
   constructor(private readonly octokit: OctokitLike) {}
 
@@ -464,16 +484,38 @@ class OctokitApiClient implements GithubApiClient {
     defaultBranch: string;
   }): Promise<{ owner: string; name: string; defaultBranch: string }> {
     // auto_init: true で空の README を作る。直後に template commit が overwrite する。
-    const res = await this.octokit.rest.repos.createForAuthenticatedUser({
-      name: input.name,
-      private: input.isPrivate,
-      auto_init: true,
-    });
-    return {
-      owner: res.data.owner.login,
-      name: res.data.name,
-      defaultBranch: res.data.default_branch,
-    };
+    try {
+      const res = await this.octokit.rest.repos.createForAuthenticatedUser({
+        name: input.name,
+        private: input.isPrivate,
+        auto_init: true,
+      });
+      return {
+        owner: res.data.owner.login,
+        name: res.data.name,
+        defaultBranch: res.data.default_branch,
+      };
+    } catch (err) {
+      // 422 name already exists: bootstrap 再実行の冪等化として既存 repo を再利用する。
+      // 新規作成直後は Git Data API への伝播待ちで template commit が失敗し得るため、
+      // この経路がないと再実行で詰む (bb8ad8/addroid-oss 未修正)
+      if ((err as { status?: number }).status !== 422) throw err;
+      const login = (await this.octokit.rest.users.getAuthenticated()).data.login;
+      const res = await this.octokit.request("GET /repos/{owner}/{repo}", {
+        owner: login,
+        repo: input.name,
+      });
+      const data = res.data as {
+        name: string;
+        default_branch: string;
+        owner: { login: string };
+      };
+      return {
+        owner: data.owner.login,
+        name: data.name,
+        defaultBranch: data.default_branch,
+      };
+    }
   }
 
   async commitTemplateFiles(input: {
@@ -507,17 +549,21 @@ class OctokitApiClient implements GithubApiClient {
       blobShas.push({ path: file.path, sha: blob.data.sha });
     }
 
-    const treeRes = await this.octokit.rest.git.createTree({
-      owner: input.owner,
-      repo: input.repo,
-      base_tree: baseTreeSha,
-      tree: blobShas.map((b) => ({
-        path: b.path,
-        mode: "100644",
-        type: "blob",
-        sha: b.sha,
-      })),
-    });
+    // 新規作成直後の repo は Git Data API 側への伝播が遅れ、POST git/trees が
+    // 一時的に 404 を返すことがあるためリトライする (bb8ad8/addroid-oss 未修正)
+    const treeRes = await retryOn404(() =>
+      this.octokit.rest.git.createTree({
+        owner: input.owner,
+        repo: input.repo,
+        base_tree: baseTreeSha,
+        tree: blobShas.map((b) => ({
+          path: b.path,
+          mode: "100644",
+          type: "blob",
+          sha: b.sha,
+        })),
+      })
+    );
 
     const commitNew = await this.octokit.rest.git.createCommit({
       owner: input.owner,

@@ -54,7 +54,11 @@ import type PgBoss from "pg-boss";
 import type { PrismaClient } from "@addroid/db";
 
 const USER_MANAGED_PRESETS = CRON_PRESETS.filter((p) => p.name !== "github_poll");
-const PRESET_NAMES = USER_MANAGED_PRESETS.map((p) => p.name) as CronPresetName[];
+const USER_MANAGED_PRESET_NAMES = USER_MANAGED_PRESETS.map((p) => p.name) as CronPresetName[];
+const LOGGABLE_PRESET_NAMES = CRON_PRESETS.map((p) => p.name) as CronPresetName[];
+const INTERNAL_LOG_ONLY_PRESETS = CRON_PRESETS.filter(
+  (p) => !(USER_MANAGED_PRESET_NAMES as readonly string[]).includes(p.name)
+);
 
 type ParsedAction =
   | { kind: "help" }
@@ -277,7 +281,7 @@ function dateStringInRuntimeTimeZone(offsetDays: number): string {
 }
 
 function parseLogs(rest: string[]): ParsedAction | ParseError {
-  const named = takeNameArg(rest, "logs");
+  const named = takeNameArg(rest, "logs", LOGGABLE_PRESET_NAMES);
   if ("kind" in named) return named;
   let limit = 20;
   let asJson = false;
@@ -315,7 +319,8 @@ interface NameArgs {
 
 function takeNameArg(
   rest: string[],
-  cmd: string
+  cmd: string,
+  allowedNames: readonly CronPresetName[] = USER_MANAGED_PRESET_NAMES
 ): NameArgs | ParseError {
   if (rest.length === 0) {
     return {
@@ -325,20 +330,20 @@ function takeNameArg(
     };
   }
   const head = rest[0]!;
-  if (!isPresetName(head)) {
+  if (!isPresetName(head, allowedNames)) {
     return {
       kind: "error",
       code: 2,
       stderr:
         `[addroid cron ${cmd}] 未知のプリセット名: ${head}\n` +
-        `  有効な名前: ${PRESET_NAMES.join(", ")}\n`,
+        `  有効な名前: ${allowedNames.join(", ")}\n`,
     };
   }
   return { name: head, rest: rest.slice(1) };
 }
 
-function isPresetName(s: string): s is CronPresetName {
-  return (PRESET_NAMES as readonly string[]).includes(s);
+function isPresetName(s: string, allowedNames: readonly CronPresetName[]): s is CronPresetName {
+  return (allowedNames as readonly string[]).includes(s);
 }
 
 // ---------------------------------------------------------------------
@@ -761,6 +766,16 @@ function printHelp(): void {
         (p) =>
           `  - ${pad(p.name, 26)}default=${pad(p.cron, 16)}${p.enabledByDefault ? "(enabled by default)" : "(disabled by default)"}`
       ),
+      ...(INTERNAL_LOG_ONLY_PRESETS.length > 0
+        ? [
+            "",
+            "Internal read-only presets:",
+            ...INTERNAL_LOG_ONLY_PRESETS.map(
+              (p) =>
+                `  - ${pad(p.name, 26)}default=${pad(p.cron, 16)}(managed automatically; logs only)`
+            ),
+          ]
+        : []),
       "",
       "Notes:",
       "  - DATABASE_URL が必要 (`.env.local` 推奨)。",

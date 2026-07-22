@@ -96,7 +96,8 @@ export async function syncMetaAdAccounts(
           currency: acc.currency ?? null,
           timezoneName: acc.timezoneName ?? null,
           accountStatus: acc.accountStatus ?? null,
-          active: true,
+          // active は手動無効化 (DB上の active=false) を保持するため再セットしない。
+          // 再有効化は accounts add --ad-account-id (registerManualAccount) 経路で行う。
         },
         select: accountSelect(),
       });

@@ -5,7 +5,15 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveAddroidPaths, type AddroidPaths } from "@addroid/config";
+
+const execFileAsync = promisify(execFile) as (
+  file: string,
+  args: readonly string[],
+  opts?: { encoding?: BufferEncoding; timeout?: number }
+) => Promise<{ stdout: string; stderr: string }>;
 
 export type UpMode = "shared" | "separate-worker";
 
@@ -71,6 +79,29 @@ export function isProcessAlive(pid: number | undefined | null): boolean {
     if (code === "EPERM") return true; // 別ユーザー起動だが存在はしている
     return false;
   }
+}
+
+export async function readProcessRssKb(
+  pid: number | undefined | null
+): Promise<number | null> {
+  if (!isProcessAlive(pid)) return null;
+  try {
+    const { stdout } = await execFileAsync(
+      "ps",
+      ["-o", "rss=", "-p", String(pid)],
+      { encoding: "utf8", timeout: 1_000 }
+    );
+    const value = Number.parseInt(stdout.trim(), 10);
+    return Number.isFinite(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatRss(kb: number | null): string | null {
+  if (kb === null) return null;
+  if (kb >= 1024 * 1024) return `${(kb / 1024 / 1024).toFixed(2)} GB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 /**

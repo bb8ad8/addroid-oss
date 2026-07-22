@@ -58,6 +58,8 @@ test("cron --help は Usage を出して 0 を返す", async () => {
   assert.match(out.stdout, /run\s+<name>/);
   assert.match(out.stdout, /--metric-date/);
   assert.match(out.stdout, /logs\s+<name>/);
+  assert.match(out.stdout, /Internal read-only presets:/);
+  assert.match(out.stdout, /github_poll/);
 });
 
 test("cron は引数なしで help を出して 2 を返す", async () => {
@@ -95,6 +97,17 @@ test("cron enable は未知のプリセット名を exit 2 で拒否する", asy
   assert.match(out.stderr, /daily_report/);
   assert.match(out.stderr, /today_report/);
   assert.match(out.stderr, /improvement_pr/);
+});
+
+test("cron enable は内部管理 github_poll を拒否する", async () => {
+  await withoutDatabaseUrl(async () => {
+    const { code, out } = await capture(() =>
+      runCronCommand(["enable", "github_poll"])
+    );
+    assert.equal(code, 2);
+    assert.match(out.stderr, /未知のプリセット名/);
+    assert.doesNotMatch(out.stderr, /DATABASE_URL/);
+  });
 });
 
 test("cron disable は未知のプリセット名を exit 2 で拒否する", async () => {
@@ -153,6 +166,18 @@ test("cron logs は --limit に正の整数以外を渡すと exit 2", async () 
   // ここでは DATABASE_URL の有無に関わらず最終的に 2 になることを期待する。
   assert.equal(code, 2);
   assert.ok(out.stderr.length > 0);
+});
+
+test("cron logs は内部管理 github_poll をログ参照対象として受け付ける", async () => {
+  await withoutDatabaseUrl(async () => {
+    const { code, out } = await capture(() =>
+      runCronCommand(["logs", "github_poll", "--limit", "-3"])
+    );
+    assert.equal(code, 2);
+    assert.match(out.stderr, /--limit は正の整数/);
+    assert.doesNotMatch(out.stderr, /未知のプリセット名/);
+    assert.doesNotMatch(out.stderr, /DATABASE_URL/);
+  });
 });
 
 test("cron set は parse 時点で 5 フィールドでない cron 式を 2 で拒否する (DB 不要)", async () => {

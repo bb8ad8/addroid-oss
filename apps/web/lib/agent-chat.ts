@@ -1276,9 +1276,9 @@ async function syncAdAccountsTool(
       currency: acc.currency ?? null,
       timezoneName: acc.timezoneName ?? null,
       accountStatus: acc.accountStatus ?? null,
-      active: true,
     };
     if (existing) {
+      // active は再セットしない: 手動無効化 (active=false) を sync が破壊しないため
       await prisma.adAccount.update({ where: { id: existing.id }, data });
       updated += 1;
     } else {
@@ -1287,6 +1287,7 @@ async function syncAdAccountsTool(
           workspaceId,
           key,
           ...data,
+          active: true,
         },
       });
       registered += 1;
