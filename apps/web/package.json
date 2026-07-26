@@ -20,7 +20,7 @@
     "@addroid/meta-adapter": "*",
     "@addroid/queue": "*",
     "cron-parser": "^4.9.0",
-    "next": "16.3.0-canary.36",
+    "next": "16.3.0-preview.9",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
