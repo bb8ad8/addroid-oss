@@ -21,7 +21,7 @@
     "@addroid/queue": "*",
     "@addroid/ops-schemas": "*",
     "cron-parser": "^4.9.0",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.3",
     "yaml": "^2.5.1"
   },
   "devDependencies": {
