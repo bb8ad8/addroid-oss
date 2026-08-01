@@ -63,12 +63,20 @@ export function createPrismaMetaTokenStore(prisma: PrismaClient): MetaOAuthToken
         },
       });
     },
-    async loadOAuthToken(provider) {
+    async loadOAuthToken(provider, accountIdentifier) {
       if (provider !== META_PROVIDER) return null;
-      const row = await prisma.oAuthToken.findFirst({
-        where: { provider },
-        orderBy: { connectedAt: "desc" },
-      });
+      // accountIdentifier 指定時はその行を優先。該当しなければ (トークンが削除された等)
+      // 既定の最新 1 件へフォールバックし、取得自体は止めない。
+      const row =
+        (accountIdentifier
+          ? await prisma.oAuthToken.findFirst({
+              where: { provider, accountIdentifier },
+            })
+          : null) ??
+        (await prisma.oAuthToken.findFirst({
+          where: { provider },
+          orderBy: { connectedAt: "desc" },
+        }));
       if (!row) return null;
       const out: MetaOAuthTokenRecord = {
         provider: row.provider as typeof META_PROVIDER,
@@ -126,6 +134,31 @@ export async function loadMetaOAuthClientFromEnv(
 export interface BuildPrismaMetaAdapterOptions {
   prisma: PrismaClient;
   env?: NodeJS.ProcessEnv;
+  /**
+   * ad account key → oauth_tokens.accountIdentifier。省略時は既定トークン 1 本の
+   * 従来挙動。ビジネスポートフォリオごとにトークンが分かれる場合に渡す。
+   */
+  resolveTokenRef?: (accountKey: string) => Promise<string | null | undefined>;
+  /** 常にこのトークンを使う (列挙系をトークン別に回すとき)。 */
+  forceTokenRef?: string | null;
+}
+
+/**
+ * `ad_accounts.metaTokenRef` を引く既定のリゾルバ。
+ * workspace を跨がずに key で一意に引ける (`@@unique([workspaceId, key])`) ため、
+ * ここでは key のみで検索し、見つからなければ null (= 既定トークン) を返す。
+ */
+export function createPrismaMetaTokenRefResolver(
+  prisma: PrismaClient,
+  workspaceId: string
+): (accountKey: string) => Promise<string | null> {
+  return async (accountKey: string) => {
+    const row = await prisma.adAccount.findUnique({
+      where: { workspaceId_key: { workspaceId, key: accountKey } },
+      select: { metaTokenRef: true },
+    });
+    return row?.metaTokenRef ?? null;
+  };
 }
 
 /**
@@ -155,5 +188,7 @@ export async function buildPrismaMetaAdapterSelection(
     tokenStore,
     ...(oauthClient ? { oauthClient } : {}),
     ...(crypto ? { crypto } : {}),
+    ...(opts.resolveTokenRef ? { resolveTokenRef: opts.resolveTokenRef } : {}),
+    ...(opts.forceTokenRef ? { forceTokenRef: opts.forceTokenRef } : {}),
   });
 }

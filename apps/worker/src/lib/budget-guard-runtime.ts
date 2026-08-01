@@ -214,6 +214,20 @@ export interface BudgetGuardAccountBudgetEntry {
   dailyBudget: number;
   monthlyBudget: number;
   currency?: string;
+  /** account 単位のしきい値上書き。指定したキーだけが共通 alerts に勝つ。 */
+  alerts?: BudgetGuardPolicy["alerts"];
+}
+
+/**
+ * 共通 alerts に account 単位の上書きを重ねる。指定のないキーは共通値のまま。
+ * 検知 GAS の「共通設定 → 案件マスタで上書き」と同じ優先順位。
+ */
+export function resolveBudgetGuardPolicyForAccount(
+  policy: BudgetGuardPolicy,
+  entry: BudgetGuardAccountBudgetEntry | undefined
+): BudgetGuardPolicy {
+  if (!entry?.alerts) return policy;
+  return { ...policy, alerts: { ...policy.alerts, ...entry.alerts } };
 }
 
 export interface LoadedBudgetGuardPolicy {
@@ -278,6 +292,7 @@ export function loadBudgetGuardPolicyForRoot(
       dailyBudget: value.dailyBudget,
       monthlyBudget: value.monthlyBudget,
       ...(value.currency ? { currency: value.currency } : {}),
+      ...(value.alerts ? { alerts: value.alerts } : {}),
     };
   }
   return { policy, accountBudgets };

@@ -105,8 +105,14 @@ export interface MetaAdapter {
   /**
    * 取得済み access token を保存先から復号して返す。CLI runner や API route が
    * 環境変数注入のためにのみ使う。
+   *
+   * @param accountKey ad account key。渡すとその広告アカウント用に登録された
+   *   トークンを使う (ビジネスポートフォリオごとにトークンが分かれるケース)。
+   *   省略時・解決できない場合は既定 (最後に接続したトークン)。
    */
-  loadAccessTokenPlaintext(): Promise<MetaAccessTokenLease | null>;
+  loadAccessTokenPlaintext(
+    accountKey?: string | null
+  ): Promise<MetaAccessTokenLease | null>;
 
   /**
    * Businesses / Ad Accounts の最新リストを取得する。トークンが無い場合は

@@ -38,6 +38,16 @@ type AccountsAction =
       adAccountId?: string;
       key?: string;
       yes: boolean;
+    }
+  | {
+      kind: "cv";
+      action: "list" | "candidates" | "set";
+      json: boolean;
+      adAccountId?: string;
+      key?: string;
+      event?: string;
+      clear: boolean;
+      days: number;
     };
 
 export async function runAccountsCommand(args: string[]): Promise<number> {
@@ -115,6 +125,9 @@ export async function runAccountsCommand(args: string[]): Promise<number> {
       printAddResult(selected, defaultAccount, parsed.json);
       return 0;
     }
+    if (parsed.kind === "cv") {
+      return await runCvAction(prisma as MetaAccountsPrisma, workspace.id, parsed);
+    }
     if (parsed.kind === "select") {
       const accounts = await listRegisteredAccounts(prisma as MetaAccountsPrisma, workspace.id);
       const target = resolveSelection(accounts, parsed);
@@ -150,8 +163,46 @@ export async function fetchAndSync(
     );
   }
   try {
-    const accounts = await selection.adapter.fetchAdAccounts();
-    return syncMetaAdAccounts(prisma, workspaceId, accounts);
+    // 登録済みの Meta トークンを全件走査する。ビジネスポートフォリオごとに
+    // トークンが分かれていると `me/adaccounts` は 1 本ぶんしか返さないため、
+    // 既定トークンだけを見ると他ポートフォリオのアカウントを取りこぼす。
+    // syncMetaAdAccounts は upsert のみで削除しないので、あるトークンから見えない
+    // アカウントが消えることはない。
+    const tokenRefs = await listMetaTokenRefs(prisma);
+    let registered = 0;
+    let updated = 0;
+    const merged = new Map<string, RegisteredAccount>();
+    const failures: string[] = [];
+    for (const tokenRef of tokenRefs.length > 0 ? tokenRefs : [null]) {
+      // fetchAdAccounts は accountKey を持たない (列挙前) ので、トークンを固定した
+      // アダプタをトークンごとに作って回す。
+      const perToken = tokenRef
+        ? (await buildPrismaMetaAdapterSelection({
+            prisma: prisma as never,
+            forceTokenRef: tokenRef,
+          })).adapter
+        : selection.adapter;
+      let accounts;
+      try {
+        accounts = await perToken.fetchAdAccounts();
+      } catch (err) {
+        failures.push(`${tokenRef ?? "default"}: ${(err as Error).message}`);
+        continue;
+      }
+      const result = await syncMetaAdAccounts(prisma, workspaceId, accounts, tokenRef);
+      registered += result.registered;
+      updated += result.updated;
+      for (const row of result.accounts) merged.set(row.id, row);
+    }
+    if (merged.size === 0 && failures.length > 0) {
+      throw new Error(`Meta アカウント取得に失敗しました: ${failures.join("; ")}`);
+    }
+    if (failures.length > 0) {
+      process.stderr.write(
+        `[addroid accounts] 一部のトークンで取得に失敗しました: ${failures.join("; ")}\n`
+      );
+    }
+    return { registered, updated, accounts: [...merged.values()] };
   } catch (err) {
     if (
       err instanceof MetaAdapterUnauthenticatedError ||
@@ -161,6 +212,192 @@ export async function fetchAndSync(
     }
     throw err;
   }
+}
+
+/** 登録済み Meta トークンの accountIdentifier を接続日時の新しい順に返す。 */
+async function listMetaTokenRefs(prisma: MetaAccountsPrisma): Promise<string[]> {
+  const store = prisma as unknown as {
+    oAuthToken?: {
+      findMany(args: unknown): Promise<Array<{ accountIdentifier: string }>>;
+    };
+  };
+  if (!store.oAuthToken) return [];
+  const rows = await store.oAuthToken.findMany({
+    where: { provider: "meta" },
+    orderBy: { connectedAt: "desc" },
+    select: { accountIdentifier: true },
+  });
+  return rows.map((r) => r.accountIdentifier);
+}
+
+/**
+ * `addroid accounts cv` — どの action_type を CV として数えるかをアカウント単位で設定する。
+ *
+ * Meta は同一の CV を複数の別名 action_type で返すため、集計対象を 1 つに決めないと
+ * CV が多重計上される。何を CV とするかはアカウントの計測設計次第なので、
+ * `candidates` で実データの action_type 別合計を見てから `set` する運用にしている。
+ */
+async function runCvAction(
+  prisma: MetaAccountsPrisma,
+  workspaceId: string,
+  parsed: Extract<AccountsAction, { kind: "cv" }>
+): Promise<number> {
+  const accounts = await listRegisteredAccounts(prisma, workspaceId);
+  if (accounts.length === 0) {
+    process.stderr.write(
+      "[addroid accounts] 登録済みの広告アカウントがありません。先に `addroid accounts add --all` を実行してください。\n"
+    );
+    return 2;
+  }
+
+  if (parsed.action === "list") {
+    if (parsed.json) {
+      process.stdout.write(
+        `${JSON.stringify(
+          accounts.map((a) => ({
+            key: a.key,
+            metaAccountId: a.metaAccountId,
+            displayName: a.displayName,
+            cvEvent: a.cvEvent ?? null,
+          })),
+          null,
+          2
+        )}\n`
+      );
+      return 0;
+    }
+    process.stdout.write("[addroid accounts cv]\n\n");
+    for (const account of accounts) {
+      const setting = account.cvEvent?.trim()
+        ? account.cvEvent
+        : "(未設定 → 既定 omni_purchase → purchase)";
+      process.stdout.write(
+        `  ${(account.metaAccountId ?? account.key).padEnd(24)} ${account.displayName}\n` +
+          `  ${" ".repeat(24)} CVイベント: ${setting}\n\n`
+      );
+    }
+    return 0;
+  }
+
+  const targets = filterCvTargets(accounts, parsed);
+  if (targets.length === 0) {
+    process.stderr.write(
+      `[addroid accounts] 指定に一致する広告アカウントがありません: ${parsed.adAccountId ?? parsed.key ?? "(未指定)"}\n`
+    );
+    return 2;
+  }
+
+  if (parsed.action === "set") {
+    if (targets.length > 1) {
+      process.stderr.write(
+        "[addroid accounts] cv set は --ad-account-id か --key で 1 件に絞ってください。\n"
+      );
+      return 2;
+    }
+    const target = targets[0]!;
+    const nextValue = parsed.clear ? null : (parsed.event?.trim() ?? null);
+    await prisma.adAccount.update({
+      where: { id: target.id },
+      data: { cvEvent: nextValue },
+    });
+    await prisma.auditLog
+      .create({
+        data: {
+          workspaceId,
+          actor: "user:cli",
+          action: "ad_account.cv_event_updated",
+          target: `ad_account:${target.id}`,
+          ref: target.metaAccountId ?? target.key,
+          metadata: { before: target.cvEvent ?? null, after: nextValue },
+        },
+      })
+      .catch(() => undefined);
+    if (parsed.json) {
+      process.stdout.write(
+        `${JSON.stringify({ key: target.key, metaAccountId: target.metaAccountId, cvEvent: nextValue }, null, 2)}\n`
+      );
+      return 0;
+    }
+    process.stdout.write(
+      `[addroid accounts cv]\n\n  ${target.displayName}\n` +
+        `  CVイベント: ${target.cvEvent ?? "(未設定)"} → ${nextValue ?? "(未設定 = 既定)"}\n\n` +
+        "  反映するには worker の再起動が必要です: addroid down && addroid start\n"
+    );
+    return 0;
+  }
+
+  // action === "candidates"
+  const { fetchInsights } = await import("@addroid/meta-adapter");
+  const { tallyActionTypes } = await import("../../../worker/src/lib/meta-cv-event.js");
+  const selection = await buildPrismaMetaAdapterSelection({ prisma: prisma as never });
+  if (selection.choice === "stub") {
+    process.stderr.write(
+      `[addroid accounts] Meta が接続されていません: ${selection.reason}\n  先に \`addroid auth meta\` を実行してください。\n`
+    );
+    return 2;
+  }
+  const lease = await selection.adapter.loadAccessTokenPlaintext();
+  if (!lease) {
+    process.stderr.write("[addroid accounts] Meta access token を読み出せません。\n");
+    return 2;
+  }
+  const until = new Date();
+  const since = new Date(until.getTime() - parsed.days * 24 * 60 * 60 * 1000);
+  const range = { since: toIsoDate(since), until: toIsoDate(until) };
+
+  process.stdout.write(
+    `[addroid accounts cv candidates] ${range.since} 〜 ${range.until} (${parsed.days}日)\n` +
+      "  action_type 別の合計。CV に相当する 1 つを選び `cv set --event <action_type>` で設定してください。\n"
+  );
+  for (const account of targets) {
+    const adAccountId = account.metaAccountId ?? account.key;
+    process.stdout.write(
+      `\n【${account.displayName}】${adAccountId} / 現設定=${account.cvEvent ?? "(未設定→既定)"}\n`
+    );
+    try {
+      const rows = await fetchInsights({
+        accessToken: lease.accessToken,
+        adAccountId,
+        fields: ["actions"],
+        timeRange: range,
+      });
+      const actions = rows.flatMap((row) =>
+        row && typeof row === "object" && Array.isArray((row as { actions?: unknown }).actions)
+          ? ((row as { actions: unknown[] }).actions ?? [])
+          : []
+      );
+      const tally = tallyActionTypes(actions);
+      if (tally.length === 0) {
+        process.stdout.write("  (この期間の action データがありません)\n");
+        continue;
+      }
+      for (const entry of tally) {
+        process.stdout.write(`  ${entry.actionType.padEnd(42)} ${entry.value}\n`);
+      }
+    } catch (err) {
+      process.stdout.write(`  取得失敗: ${(err as Error).message}\n`);
+    }
+  }
+  process.stdout.write("\n");
+  return 0;
+}
+
+function filterCvTargets(
+  accounts: RegisteredAccount[],
+  parsed: Extract<AccountsAction, { kind: "cv" }>
+): RegisteredAccount[] {
+  if (parsed.adAccountId) {
+    const wanted = normalizeMetaAccountId(parsed.adAccountId);
+    return accounts.filter(
+      (a) => a.metaAccountId === wanted || a.key === wanted || a.key === parsed.adAccountId
+    );
+  }
+  if (parsed.key) return accounts.filter((a) => a.key === parsed.key);
+  return accounts;
+}
+
+function toIsoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 async function loadDefaultId(
@@ -325,14 +562,28 @@ function printSelectResult(account: RegisteredAccount, json: boolean): void {
 }
 
 function parseArgs(args: string[]): AccountsAction {
-  const [subcommand = "list", ...rest] = args;
+  const [subcommand = "list", ...rawRest] = args;
   if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
     return { kind: "help" };
+  }
+  // `accounts cv <action>` は 2 語のサブコマンド。先頭の非オプション語を action として取る。
+  let cvAction: "list" | "candidates" | "set" = "list";
+  let rest = rawRest;
+  if (subcommand === "cv" && rawRest[0] && !rawRest[0].startsWith("-")) {
+    const [head, ...tail] = rawRest;
+    if (head !== "list" && head !== "candidates" && head !== "set") {
+      return { kind: "error", message: `unknown cv action: ${head}` };
+    }
+    cvAction = head;
+    rest = tail;
   }
   let json = false;
   let all = false;
   let selectDefault = false;
   let yes = false;
+  let clear = false;
+  let days = 14;
+  let event: string | undefined;
   let metaAccountId: string | undefined;
   let key: string | undefined;
   let name: string | undefined;
@@ -354,6 +605,11 @@ function parseArgs(args: string[]): AccountsAction {
       else if (a.startsWith("--key=")) key = a.slice("--key=".length);
       else if (a === "--name") name = next();
       else if (a.startsWith("--name=")) name = a.slice("--name=".length);
+      else if (a === "--event") event = next();
+      else if (a.startsWith("--event=")) event = a.slice("--event=".length);
+      else if (a === "--clear") clear = true;
+      else if (a === "--days") days = Number(next());
+      else if (a.startsWith("--days=")) days = Number(a.slice("--days=".length));
       else return { kind: "error", message: `unknown option: ${a}` };
     } catch (err) {
       return { kind: "error", message: (err as Error).message };
@@ -381,6 +637,24 @@ function parseArgs(args: string[]): AccountsAction {
       yes,
     };
   }
+  if (subcommand === "cv") {
+    if (!Number.isFinite(days) || days < 1 || days > 90) {
+      return { kind: "error", message: "--days は 1〜90 の日数で指定してください" };
+    }
+    if (cvAction === "set" && !event && !clear) {
+      return { kind: "error", message: "cv set には --event <action_type> か --clear が必要です" };
+    }
+    return {
+      kind: "cv",
+      action: cvAction,
+      json,
+      ...(metaAccountId ? { adAccountId: metaAccountId } : {}),
+      ...(key ? { key } : {}),
+      ...(event ? { event } : {}),
+      clear,
+      days,
+    };
+  }
   return { kind: "error", message: `unknown subcommand: ${subcommand}` };
 }
 
@@ -395,6 +669,18 @@ function printAccountsHelp(): void {
       "  addroid accounts add [--all] [--select-default] [--json]",
       "  addroid accounts add --ad-account-id act_123 [--key primary] [--name NAME]",
       "  addroid accounts select [--ad-account-id act_123 | --key primary] [--yes] [--json]",
+      "",
+      "CV イベント (どの action_type を CV として数えるか。アカウントごとに設定):",
+      "  addroid accounts cv list [--json]",
+      "  addroid accounts cv candidates [--ad-account-id act_123] [--days 14]",
+      "  addroid accounts cv set --ad-account-id act_123 --event purchase",
+      "  addroid accounts cv set --ad-account-id act_123 --clear",
+      "",
+      "  Meta は同一の CV を複数の action_type (purchase / omni_purchase /",
+      "  offsite_conversion.fb_pixel_purchase ...) で重複して返します。集計対象を 1 つに",
+      "  決めないと CV が多重計上され CPA が実際より安く見えます。candidates で実データの",
+      "  action_type 別合計を確認してから set してください。未設定時の既定は",
+      "  omni_purchase → purchase の順で最初に見つかった 1 系統です。",
       "",
     ].join("\n")
   );

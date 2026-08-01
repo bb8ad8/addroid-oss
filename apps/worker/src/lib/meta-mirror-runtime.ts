@@ -1,5 +1,6 @@
 import { META_GRAPH_API_VERSION } from "@addroid/meta-adapter";
 import { Prisma, type PrismaClient } from "@addroid/db";
+import { resolveRowConversions } from "./meta-cv-event.js";
 
 type NodeType = "campaign" | "adset" | "ad";
 type InsightsLevel = NodeType;
@@ -74,14 +75,6 @@ export interface RunMetaMirrorSyncOptions {
   includeMetrics?: boolean;
 }
 
-const CONVERSION_ACTION_TYPES = [
-  "purchase",
-  "lead",
-  "complete_registration",
-  "offsite_conversion",
-  "omni_purchase",
-];
-
 export async function runMetaMirrorSync(
   opts: RunMetaMirrorSyncOptions
 ): Promise<MetaMirrorSyncResult> {
@@ -110,7 +103,12 @@ export async function runMetaMirrorSync(
   };
   if (opts.includeMetrics !== false) {
     try {
-      const insightRows = await fetchGraphInsights(metaAccountId, opts.accessToken, metricDate);
+      const insightRows = await fetchGraphInsights(
+        metaAccountId,
+        opts.accessToken,
+        metricDate,
+        account.cvEvent ?? null
+      );
       const snapshots = await persistPerformanceSnapshots({
         prisma: opts.prisma,
         accountId: account.id,
@@ -177,6 +175,7 @@ async function resolveSyncAccount(opts: RunMetaMirrorSyncOptions): Promise<{
   metaAccountId: string | null;
   displayName: string | null;
   timezoneName: string | null;
+  cvEvent: string | null;
 }> {
   const ws = await opts.prisma.workspace.findUnique({
     where: { id: opts.workspaceId },
@@ -201,6 +200,7 @@ async function resolveSyncAccount(opts: RunMetaMirrorSyncOptions): Promise<{
       metaAccountId: true,
       displayName: true,
       timezoneName: true,
+      cvEvent: true,
     },
   });
   if (!account) throw new Error("同期対象の広告アカウントがありません。");
@@ -353,11 +353,12 @@ async function upsertNode(
 async function fetchGraphInsights(
   accountId: string,
   accessToken: string,
-  metricDate: string
+  metricDate: string,
+  cvEvent: string | null
 ): Promise<GraphInsightsRow[]> {
   const levels: InsightsLevel[] = ["campaign", "adset", "ad"];
   const nested = await Promise.all(
-    levels.map((level) => fetchGraphInsightsLevel(accountId, level, accessToken, metricDate))
+    levels.map((level) => fetchGraphInsightsLevel(accountId, level, accessToken, metricDate, cvEvent))
   );
   return nested.flat();
 }
@@ -366,7 +367,8 @@ async function fetchGraphInsightsLevel(
   accountId: string,
   level: InsightsLevel,
   accessToken: string,
-  metricDate: string
+  metricDate: string,
+  cvEvent: string | null
 ): Promise<GraphInsightsRow[]> {
   let url = new URL(`https://graph.facebook.com/${META_GRAPH_API_VERSION}/${accountId}/insights`);
   url.searchParams.set("level", level);
@@ -400,7 +402,7 @@ async function fetchGraphInsightsLevel(
         impressions: integerField(item, "impressions"),
         clicks: integerField(item, "clicks"),
         spendMicros: majorToMicros(numberField(item, "spend")),
-        conversions: extractConversions(item),
+        conversions: resolveRowConversions(item, cvEvent),
       });
     }
     const next = typeof body.paging?.next === "string" ? body.paging.next : "";
@@ -566,21 +568,9 @@ function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-function extractConversions(row: Record<string, unknown>): number {
-  const direct = numberField(row, "conversions");
-  if (direct > 0) return Math.floor(direct);
-  if (!Array.isArray(row.actions)) return 0;
-  let total = 0;
-  for (const action of row.actions) {
-    if (!isRecord(action)) continue;
-    const actionType = readString(action.action_type);
-    if (!actionType) continue;
-    if (CONVERSION_ACTION_TYPES.some((needle) => actionType.includes(needle))) {
-      total += numberField(action, "value");
-    }
-  }
-  return Math.floor(total);
-}
+// CV 抽出は meta-cv-event.ts の resolveRowConversions に集約した (daily_report と共通)。
+// 以前はここで action_type を部分一致で合計していたため、同一 CV を返す複数の別名
+// (purchase / omni_purchase / offsite_conversion.fb_pixel_purchase ...) を多重計上していた。
 
 function integerField(row: Record<string, unknown>, key: string): number {
   return Math.max(0, Math.floor(numberField(row, key)));
