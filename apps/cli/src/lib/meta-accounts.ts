@@ -23,6 +23,10 @@ export interface RegisteredAccount {
   currency?: string | null;
   timezoneName?: string | null;
   accountStatus?: number | null;
+  /** CV として数える Meta の action_type。null は既定 (omni_purchase → purchase)。 */
+  cvEvent?: string | null;
+  /** このアカウントを叩くトークン (oauth_tokens.accountIdentifier)。null は既定。 */
+  metaTokenRef?: string | null;
 }
 
 export interface WorkspaceDefault {
@@ -70,10 +74,16 @@ export async function listRegisteredAccounts(
   });
 }
 
+/**
+ * @param metaTokenRef このアカウント一覧を取得したトークンの accountIdentifier。
+ *   渡すと各アカウントに紐付けを刻み、以後その広告アカウントは常にこのトークンで
+ *   取得される。ビジネスポートフォリオが分かれている環境で必須。
+ */
 export async function syncMetaAdAccounts(
   prisma: MetaAccountsPrisma,
   workspaceId: string,
-  accounts: readonly MetaAdAccount[]
+  accounts: readonly MetaAdAccount[],
+  metaTokenRef?: string | null
 ): Promise<{ registered: number; updated: number; accounts: RegisteredAccount[] }> {
   let registered = 0;
   let updated = 0;
@@ -97,6 +107,8 @@ export async function syncMetaAdAccounts(
           timezoneName: acc.timezoneName ?? null,
           accountStatus: acc.accountStatus ?? null,
           active: true,
+          // 見えたトークンを紐付ける。未指定なら既存値を保持する。
+          ...(metaTokenRef ? { metaTokenRef } : {}),
         },
         select: accountSelect(),
       });
@@ -116,6 +128,7 @@ export async function syncMetaAdAccounts(
         timezoneName: acc.timezoneName ?? null,
         accountStatus: acc.accountStatus ?? null,
         active: true,
+        ...(metaTokenRef ? { metaTokenRef } : {}),
       },
       select: accountSelect(),
     });
@@ -250,6 +263,8 @@ export function formatAccountLine(
     account.currency ?? null,
     account.timezoneName ?? null,
     typeof account.accountStatus === "number" ? `status=${account.accountStatus}` : null,
+    // どのトークンで取得しているか。トークン本体ではなくシステムユーザー ID のみ出す。
+    account.metaTokenRef ? `token=${account.metaTokenRef}` : null,
   ].filter((v): v is string => Boolean(v));
   return `${markers} ${account.key.padEnd(18)} ${meta.padEnd(18)} ${account.displayName}${
     detail.length > 0 ? ` (${detail.join(", ")})` : ""
@@ -275,5 +290,7 @@ function accountSelect() {
     currency: true,
     timezoneName: true,
     accountStatus: true,
+    cvEvent: true,
+    metaTokenRef: true,
   } as const;
 }

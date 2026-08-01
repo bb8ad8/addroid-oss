@@ -80,7 +80,10 @@ import {
 import { resolveApplyExecutor } from "./lib/apply-meta-executor.js";
 import { runMetaMirrorSync } from "./lib/meta-mirror-runtime.js";
 import { resolveAutomationMutationExecutor } from "./lib/automation-action-executor.js";
-import { buildPrismaMetaAdapterSelection } from "./lib/meta-runtime.js";
+import {
+  buildPrismaMetaAdapterSelection,
+  createPrismaMetaTokenRefResolver,
+} from "./lib/meta-runtime.js";
 import { createPostgresAdAccountLockProvider } from "./lib/account-lock.js";
 import {
   MockDailyReportInsightsProvider,
@@ -93,6 +96,7 @@ import {
   createBudgetGuardAuditRunner,
   createPrismaBudgetGuardStore,
   loadBudgetGuardPolicyForRoot,
+  resolveBudgetGuardPolicyForAccount,
 } from "./lib/budget-guard-runtime.js";
 import {
   createBudgetRebalanceAuditWriter,
@@ -298,6 +302,9 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
   const metaAdapterSelection = await buildPrismaMetaAdapterSelection({
     prisma,
     env: process.env,
+    // ビジネスポートフォリオごとにトークンが分かれるため、accountKey を渡した
+    // 呼び出しではそのアカウント用のトークンを使う (未設定なら既定トークン)。
+    resolveTokenRef: createPrismaMetaTokenRefResolver(prisma, workspace.id),
   });
   log.info(
     `[worker] meta adapter: ${metaAdapterSelection.choice} (${metaAdapterSelection.reason})`
@@ -313,6 +320,15 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
         select: { metaAccountId: true },
       });
       return row?.metaAccountId ?? (accountKey.startsWith("act_") ? accountKey : null);
+    },
+    // CV として数える action_type はアカウントごとに違う (購入 / LINE 友だち追加 /
+    // カスタム CV ...)。未設定なら resolveConversionCount 側の既定にフォールバックする。
+    resolveConversionEvent: async (accountKey) => {
+      const row = await prisma.adAccount.findUnique({
+        where: { workspaceId_key: { workspaceId: workspace.id, key: accountKey } },
+        select: { cvEvent: true },
+      });
+      return row?.cvEvent ?? null;
     },
   });
   log.info(
@@ -469,7 +485,7 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
             const errors: string[] = [];
             for (const acc of accounts) {
               const lease = await metaAdapterSelection.adapter
-                .loadAccessTokenPlaintext()
+                .loadAccessTokenPlaintext(acc.key)
                 .catch(() => null);
               if (lease?.accessToken) {
                 await runMetaMirrorSync({
@@ -673,7 +689,11 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
                     workspaceId: workspace.id,
                     mode: effectiveMode,
                     accountKey: acc.key,
-                    policy: loadedPolicy.policy,
+                    // 共通 alerts に account 単位の上書きを重ねてから評価する。
+                    policy: resolveBudgetGuardPolicyForAccount(
+                      loadedPolicy.policy,
+                      accountBudget
+                    ),
                     spendContext: await buildBudgetGuardSpendContext({
                       prisma,
                       accountId: acc.id,
@@ -1490,11 +1510,12 @@ export async function startWorker(opts: StartWorkerOptions = {}): Promise<Worker
           `[worker] execute_apply ${applyJobId}: ${summary.state} (succeeded=${summary.succeeded}, failed=${summary.failed}, skipped=${summary.skipped}, paused-rewrites=${summary.pausedRewrites})`
         );
         if (summary.state === "succeeded") {
-          const lease = await metaAdapterSelection.adapter
-            .loadAccessTokenPlaintext()
-            .catch(() => null);
-          if (lease?.accessToken) {
-            for (const accountKey of collectAccountKeysFromOutcomes(summary.outcomes)) {
+          for (const accountKey of collectAccountKeysFromOutcomes(summary.outcomes)) {
+            // アカウントごとにトークンが違い得るのでループ内で解決する。
+            const lease = await metaAdapterSelection.adapter
+              .loadAccessTokenPlaintext(accountKey)
+              .catch(() => null);
+            if (lease?.accessToken) {
               await runMetaMirrorSync({
                 prisma,
                 workspaceId: workspace.id,

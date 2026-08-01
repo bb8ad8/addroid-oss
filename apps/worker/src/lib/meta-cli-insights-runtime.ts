@@ -26,12 +26,14 @@ import {
   type DailyReportNodeType,
 } from "@addroid/queue";
 import { META_CLI_MIN_VERSION } from "./apply-meta-executor.js";
+import { resolveRowConversions } from "./meta-cv-event.js";
 
 export interface MetaCliDailyReportInsightsProviderOptions {
   runner: Pick<MetaCliRunner, "run">;
   resolveAdAccountId?: (accountKey: string) => Promise<string | null | undefined>;
   fields?: string[];
-  conversionActionTypes?: string[];
+  /** CV として数える action_type (AdAccount.cvEvent 相当)。null なら既定。 */
+  cvEvent?: string | null;
   timeoutMs?: number;
 }
 
@@ -41,7 +43,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
     | ((accountKey: string) => Promise<string | null | undefined>)
     | undefined;
   private readonly fields: string[];
-  private readonly conversionActionTypes: string[];
+  private readonly cvEvent: string | null;
   private readonly timeoutMs: number;
   private readonly maxNodesPerLevel: number;
 
@@ -58,7 +60,8 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions は Graph API v25.0 で廃止 (#100 not valid for fields param)。
+      // 3 秒再生は actions 配列の action_type="video_view" から取る。
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -71,13 +74,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "account_id",
       "account_name",
     ];
-    this.conversionActionTypes = opts.conversionActionTypes ?? [
-      "purchase",
-      "lead",
-      "complete_registration",
-      "offsite_conversion",
-      "omni_purchase",
-    ];
+    this.cvEvent = opts.cvEvent ?? null;
     this.timeoutMs = opts.timeoutMs ?? 120_000;
     this.maxNodesPerLevel = Number(process.env.ADDROID_META_CLI_DAILY_REPORT_MAX_NODES ?? 50);
   }
@@ -152,7 +149,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
     if (input.level === "account") {
       const result = await this.runInsights(input, {});
       return {
-        rows: parseInsightsRows(result, input.level, this.conversionActionTypes),
+        rows: parseInsightsRows(result, input.level, this.cvEvent),
         detail: `${input.level}/${input.metricDate}: ${result.exitClass}`,
       };
     }
@@ -173,7 +170,7 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
         node.id,
         node.name
       );
-      rows.push(...parseInsightsPayload(payload, input.level, this.conversionActionTypes));
+      rows.push(...parseInsightsPayload(payload, input.level, this.cvEvent));
     }
     return {
       rows,
@@ -265,7 +262,8 @@ export class MetaCliDailyReportInsightsProvider implements DailyReportInsightsPr
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions は Graph API v25.0 で廃止 (#100 not valid for fields param)。
+      // 3 秒再生は actions 配列の action_type="video_view" から取る。
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -291,16 +289,21 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
     | ((accountKey: string) => Promise<string | null | undefined>)
     | undefined;
   private readonly fields: string[];
-  private readonly conversionActionTypes: string[];
+  // CV として数える action_type をアカウント単位で解決するフック (AdAccount.cvEvent)。
+  // 未指定なら既定 (omni_purchase → purchase) にフォールバックする。
+  private readonly resolveConversionEvent:
+    | ((accountKey: string) => Promise<string | null | undefined>)
+    | undefined;
 
   constructor(opts: {
     metaAdapter: MetaAdapter;
     resolveAdAccountId?: (accountKey: string) => Promise<string | null | undefined>;
+    resolveConversionEvent?: (accountKey: string) => Promise<string | null | undefined>;
     fields?: string[];
-    conversionActionTypes?: string[];
   }) {
     this.metaAdapter = opts.metaAdapter;
     this.resolveAdAccountId = opts.resolveAdAccountId;
+    this.resolveConversionEvent = opts.resolveConversionEvent;
     this.fields = opts.fields ?? [
       "spend",
       "impressions",
@@ -311,7 +314,8 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
       "actions",
       "frequency",
       "video_thruplay_watched_actions",
-      "video_3_sec_watched_actions",
+      // video_3_sec_watched_actions は Graph API v25.0 で廃止 (#100 not valid for fields param)。
+      // 3 秒再生は actions 配列の action_type="video_view" から取る。
       "quality_ranking",
       "engagement_rate_ranking",
       "conversion_rate_ranking",
@@ -324,19 +328,13 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
       "account_id",
       "account_name",
     ];
-    this.conversionActionTypes = opts.conversionActionTypes ?? [
-      "purchase",
-      "lead",
-      "complete_registration",
-      "offsite_conversion",
-      "omni_purchase",
-    ];
   }
 
   async fetchInsights(
     req: DailyReportInsightsRequest
   ): Promise<DailyReportInsightsResponse> {
-    const lease = await this.metaAdapter.loadAccessTokenPlaintext();
+    // アカウントごとに使うトークンが違い得るので accountKey を渡す。
+    const lease = await this.metaAdapter.loadAccessTokenPlaintext(req.accountKey);
     if (!lease) {
       return {
         current: [],
@@ -356,6 +354,9 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
         detail: "Meta ad account id is missing.",
       };
     }
+    const cvEvent = this.resolveConversionEvent
+      ? ((await this.resolveConversionEvent(req.accountKey)) ?? null)
+      : null;
     const levels = enabledBreakdownLevels(req.breakdownsPolicy ?? {
       fetchAccount: true,
       fetchCampaign: true,
@@ -374,9 +375,7 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
           level,
           timeRange: { since: req.metricDate, until: req.metricDate },
         });
-        current.push(
-          ...parseInsightsPayload(rows, level, this.conversionActionTypes)
-        );
+        current.push(...parseInsightsPayload(rows, level, cvEvent));
         if (req.includePriorPeriod) {
           const priorDate = subtractOneUtcDay(req.metricDate);
           const priorRows = await fetchInsights({
@@ -386,9 +385,7 @@ export class GraphApiDailyReportInsightsProvider implements DailyReportInsightsP
             level,
             timeRange: { since: priorDate, until: priorDate },
           });
-          prior.push(
-            ...parseInsightsPayload(priorRows, level, this.conversionActionTypes)
-          );
+          prior.push(...parseInsightsPayload(priorRows, level, cvEvent));
         }
       }
     } catch (err) {
@@ -412,6 +409,8 @@ export interface ResolveMetaCliInsightsProviderOptions {
   metaAdapter: MetaAdapter;
   env?: NodeJS.ProcessEnv;
   resolveAdAccountId?: (accountKey: string) => Promise<string | null | undefined>;
+  /** CV として数える action_type をアカウント単位で解決する (AdAccount.cvEvent)。 */
+  resolveConversionEvent?: (accountKey: string) => Promise<string | null | undefined>;
   spawnImpl?: MetaCliRunnerOptions["spawnImpl"];
   versionResolver?: MetaCliRunnerOptions["versionResolver"];
 }
@@ -431,6 +430,9 @@ export async function resolveMetaCliInsightsProvider(
     provider: new GraphApiDailyReportInsightsProvider({
       metaAdapter: opts.metaAdapter,
       ...(opts.resolveAdAccountId ? { resolveAdAccountId: opts.resolveAdAccountId } : {}),
+      ...(opts.resolveConversionEvent
+        ? { resolveConversionEvent: opts.resolveConversionEvent }
+        : {}),
     }),
     mode: "graph_api",
     reason: "using Meta Graph API as canonical insights provider; Meta Ads CLI is optional diagnostic only",
@@ -447,6 +449,9 @@ export async function resolveMetaCliInsightsProvider(
         provider: new GraphApiDailyReportInsightsProvider({
           metaAdapter: opts.metaAdapter,
           ...(opts.resolveAdAccountId ? { resolveAdAccountId: opts.resolveAdAccountId } : {}),
+          ...(opts.resolveConversionEvent
+            ? { resolveConversionEvent: opts.resolveConversionEvent }
+            : {}),
         }),
         mode: "graph_api",
         reason:
@@ -464,8 +469,8 @@ export async function resolveMetaCliInsightsProvider(
     spawnImpl: opts.spawnImpl ?? nodeSpawn,
     minVersion: META_CLI_MIN_VERSION,
     requireVerifiedVersion: true,
-    loadTokenForAccount: async () => {
-      const lease = await opts.metaAdapter.loadAccessTokenPlaintext();
+    loadTokenForAccount: async (accountKey) => {
+      const lease = await opts.metaAdapter.loadAccessTokenPlaintext(accountKey);
       if (!lease) return null;
       return { accessToken: lease.accessToken };
     },
@@ -488,10 +493,10 @@ export async function resolveMetaCliInsightsProvider(
 function parseInsightsRows(
   result: MetaCliExecutionResult,
   fallbackLevel: DailyReportNodeType,
-  conversionActionTypes: readonly string[]
+  cvEvent: string | null
 ): DailyReportInsightsRow[] {
   const payload = parseJson(result.stdout);
-  return parseInsightsPayload(payload, fallbackLevel, conversionActionTypes);
+  return parseInsightsPayload(payload, fallbackLevel, cvEvent);
 }
 
 function withFilterIdentity(
@@ -525,7 +530,7 @@ function withFilterIdentity(
 function parseInsightsPayload(
   payload: unknown,
   fallbackLevel: DailyReportNodeType,
-  conversionActionTypes: readonly string[]
+  cvEvent: string | null
 ): DailyReportInsightsRow[] {
   const rows = extractArray(payload);
   const out: DailyReportInsightsRow[] = [];
@@ -541,7 +546,7 @@ function parseInsightsPayload(
       spendMicros: majorToMicros(numberField(row, "spend")),
       impressions: integerField(row, "impressions"),
       clicks: integerField(row, "clicks"),
-      conversions: extractConversions(row, conversionActionTypes),
+      conversions: resolveRowConversions(row, cvEvent),
       frequency: nullableNumberField(row, "frequency"),
       reach: nullableIntegerField(row, "reach"),
       linkClicks: nullableIntegerField(row, "inline_link_clicks"),
@@ -549,10 +554,13 @@ function parseInsightsPayload(
         row.video_thruplay_watched_actions,
         "video_thruplay_watched_actions"
       ),
-      video3SecViews: extractActionValue(
-        row.video_3_sec_watched_actions,
-        "video_3_sec_watched_actions"
-      ),
+      // 旧レスポンス形式 (video_3_sec_watched_actions) が来た場合は従来どおり読み、
+      // v25.0 以降は actions の video_view (= 3 秒再生) にフォールバックする。
+      video3SecViews:
+        extractActionValue(
+          row.video_3_sec_watched_actions,
+          "video_3_sec_watched_actions"
+        ) ?? extractActionValue(row.actions, "video_view"),
       qualityRanking: stringField(row, "quality_ranking"),
       engagementRateRanking: stringField(row, "engagement_rate_ranking"),
       conversionRateRanking: stringField(row, "conversion_rate_ranking"),
@@ -625,25 +633,10 @@ function inferDisplayName(
   return stringField(row, "account_name") ?? stringField(row, "name");
 }
 
-function extractConversions(
-  row: Record<string, unknown>,
-  actionTypes: readonly string[]
-): number {
-  const direct = numberField(row, "conversions");
-  if (direct > 0) return Math.floor(direct);
-  const actions = row.actions;
-  if (!Array.isArray(actions)) return 0;
-  let total = 0;
-  for (const action of actions) {
-    if (!isRecord(action)) continue;
-    const type = stringField(action, "action_type");
-    if (!type) continue;
-    if (actionTypes.some((needle) => type.includes(needle))) {
-      total += numberField(action, "value");
-    }
-  }
-  return Math.floor(total);
-}
+// CV 抽出は meta-cv-event.ts の resolveRowConversions に集約した。
+// 以前はここで action_type を部分一致 (type.includes(needle)) で合計していたため、
+// needle "purchase" が purchase / omni_purchase / offsite_conversion.fb_pixel_purchase など
+// 8 種すべてに当たり、同一 CV を 8 重に数えていた (CV 8 倍 / CPA 1/8)。
 
 export function extractActionValue(
   actions: unknown,

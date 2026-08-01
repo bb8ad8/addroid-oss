@@ -127,6 +127,21 @@ model AdAccount {
   // workspace mode と一緒に読み出し、`modeOverride ?? workspaceMode` を解決して
   // daily_report / budget_guard / improvement_pr の呼び出しに渡す。
   modeOverride  String?
+  // CV として数える Meta の action_type。アカウントごとに計測設計が違うため上書きできる。
+  //   null                              → 既定 (omni_purchase → purchase の順で最初に非 0 を採用)
+  //   "purchase" 等の標準イベント名        → 完全一致 → offsite_conversion.fb_pixel_<ev> → omni_<ev>
+  //   "offsite_conversion.fb_pixel_lead" → 完全一致 (無ければ部分一致)
+  //   "1234567890" (数字のみ)            → カスタム CV の ID として .custom.<ID> を探す
+  // いずれも「合計せず最初に一致した 1 系統だけを採る」。同一 CV を複数の別名 action_type
+  // (purchase / omni_purchase / offsite_conversion.fb_pixel_purchase ...) が返す Meta の仕様上、
+  // 合計すると多重計上になるため。
+  cvEvent       String?
+  // この広告アカウントを叩くときに使う Meta アクセストークン。
+  // 値は oauth_tokens.accountIdentifier (= システムユーザー ID) と一致させる。
+  //   null → 既定 (最後に接続したトークン)
+  // ビジネスポートフォリオが違うとトークンも別になるため、アカウント単位で持つ。
+  // 参照先の行が消えている場合も既定にフォールバックする (fail-open)。
+  metaTokenRef  String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

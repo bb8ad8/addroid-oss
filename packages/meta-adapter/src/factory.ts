@@ -24,6 +24,13 @@ export interface SelectMetaAdapterOptions {
   oauthClient?: MetaOAuthClientConfig | null;
   mock?: Omit<MockMetaAdapterOptions, "tokenStore">;
   fetchImpl?: typeof fetch;
+  /**
+   * ad account key → oauth_tokens.accountIdentifier。ビジネスポートフォリオごとに
+   * トークンが分かれる場合に、広告アカウント単位で使い分けるためのフック。
+   */
+  resolveTokenRef?: (accountKey: string) => Promise<string | null | undefined>;
+  /** 常にこのトークンを使う (列挙系をトークン別に回すとき)。 */
+  forceTokenRef?: string | null;
 }
 
 export type MetaAdapterChoice = "mock" | "real" | "token" | "stub";
@@ -61,6 +68,8 @@ export function selectMetaAdapter(opts: SelectMetaAdapterOptions): MetaAdapterSe
         tokenStore: opts.tokenStore,
         crypto: opts.crypto,
         ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+        ...(opts.resolveTokenRef ? { resolveTokenRef: opts.resolveTokenRef } : {}),
+        ...(opts.forceTokenRef ? { forceTokenRef: opts.forceTokenRef } : {}),
       }),
       choice: "token",
       reason: "Manual Meta access token + crypto boundary configured",

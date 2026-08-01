@@ -1515,10 +1515,13 @@ async function runAuthMetaToken(
       connectedAt,
     });
 
+    // このトークンで見えたアカウントに紐付けを刻む。以後その広告アカウントは
+    // 常にこのトークンで取得される (ビジネスポートフォリオごとの使い分け)。
     const synced = await syncMetaAdAccounts(
       prisma,
       workspace.id,
-      adAccounts as readonly MetaAdAccount[]
+      adAccounts as readonly MetaAdAccount[],
+      accountIdentifier
     );
     const assetReadiness = await buildMetaAssetReadinessSummaries({
       accessToken,
@@ -1653,7 +1656,8 @@ async function runAuthMetaOAuth(parsed: ParsedMetaArgs): Promise<number> {
     const synced = await syncMetaAdAccounts(
       prisma,
       workspace.id,
-      connection.adAccounts as readonly MetaAdAccount[]
+      connection.adAccounts as readonly MetaAdAccount[],
+      connection.accountIdentifier
     );
     const lease = await adapterSelection.adapter.loadAccessTokenPlaintext();
     const assetReadiness = lease

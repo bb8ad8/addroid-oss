@@ -26,8 +26,17 @@ export interface MetaOAuthTokenRecord {
 export interface MetaOAuthTokenStore {
   /** provider+account 単位で upsert する。 */
   saveOAuthToken(record: MetaOAuthTokenRecord): Promise<void>;
-  /** 直近で接続された 1 件を返す。 */
-  loadOAuthToken(provider: MetaTokenProvider): Promise<MetaOAuthTokenRecord | null>;
+  /**
+   * トークンを 1 件返す。
+   *
+   * @param accountIdentifier 指定するとその行を返す。ビジネスポートフォリオごとに
+   *   トークンが分かれるため、広告アカウント単位で使い分けられるようにしている。
+   *   未指定、または該当行が無い場合は直近で接続された 1 件にフォールバックする。
+   */
+  loadOAuthToken(
+    provider: MetaTokenProvider,
+    accountIdentifier?: string | null
+  ): Promise<MetaOAuthTokenRecord | null>;
 }
 
 /**
@@ -42,7 +51,15 @@ export class InMemoryMetaTokenStore implements MetaOAuthTokenStore {
     this.records.set(key, { ...record });
   }
 
-  async loadOAuthToken(provider: MetaTokenProvider): Promise<MetaOAuthTokenRecord | null> {
+  async loadOAuthToken(
+    provider: MetaTokenProvider,
+    accountIdentifier?: string | null
+  ): Promise<MetaOAuthTokenRecord | null> {
+    if (accountIdentifier) {
+      const exact = this.records.get(`${provider}:${accountIdentifier}`);
+      if (exact) return { ...exact };
+      // 該当なしは既定へフォールバック (下へ抜ける)。
+    }
     let latest: MetaOAuthTokenRecord | null = null;
     for (const rec of this.records.values()) {
       if (rec.provider !== provider) continue;

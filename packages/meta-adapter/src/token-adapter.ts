@@ -27,17 +27,42 @@ export interface StoredTokenMetaAdapterDeps {
   tokenStore: MetaOAuthTokenStore;
   crypto: CryptoEncryptDecrypt;
   fetchImpl?: typeof fetch;
+  /**
+   * ad account key → 使用する oauth_tokens.accountIdentifier を解決する。
+   * ビジネスポートフォリオが違うとトークンも別になるため、アカウント単位で
+   * 使い分ける。未指定 / null を返した場合は既定 (最新トークン) を使う。
+   */
+  resolveTokenRef?: (accountKey: string) => Promise<string | null | undefined>;
+  /**
+   * このアダプタが常に使うトークン (oauth_tokens.accountIdentifier)。
+   * accountKey を持たない列挙系 (fetchAdAccounts / fetchBusinesses) を
+   * トークンごとに実行したいときに使う。resolveTokenRef より優先される。
+   */
+  forceTokenRef?: string | null;
 }
 
 export class StoredTokenMetaAdapter implements MetaAdapter {
   private readonly tokenStore: MetaOAuthTokenStore;
   private readonly crypto: CryptoEncryptDecrypt;
   private readonly fetchImpl: typeof fetch;
+  private readonly resolveTokenRef:
+    | ((accountKey: string) => Promise<string | null | undefined>)
+    | undefined;
+  private readonly forceTokenRef: string | null;
 
   constructor(deps: StoredTokenMetaAdapterDeps) {
     this.tokenStore = deps.tokenStore;
     this.crypto = deps.crypto;
     this.fetchImpl = deps.fetchImpl ?? fetch;
+    this.resolveTokenRef = deps.resolveTokenRef;
+    this.forceTokenRef = deps.forceTokenRef ?? null;
+  }
+
+  /** accountKey が渡されたときだけ、そのアカウント用の tokenRef を引く。 */
+  private async tokenRefFor(accountKey?: string | null): Promise<string | null> {
+    if (this.forceTokenRef) return this.forceTokenRef;
+    if (!accountKey || !this.resolveTokenRef) return null;
+    return (await this.resolveTokenRef(accountKey)) ?? null;
   }
 
   async beginOAuth(): Promise<MetaBeginOAuthResult> {
@@ -52,8 +77,13 @@ export class StoredTokenMetaAdapter implements MetaAdapter {
     throw new MetaAdapterNotImplementedError("refreshLongLivedToken");
   }
 
-  async loadAccessTokenPlaintext(): Promise<MetaAccessTokenLease | null> {
-    const rec = await this.tokenStore.loadOAuthToken("meta");
+  async loadAccessTokenPlaintext(
+    accountKey?: string | null
+  ): Promise<MetaAccessTokenLease | null> {
+    const rec = await this.tokenStore.loadOAuthToken(
+      "meta",
+      await this.tokenRefFor(accountKey)
+    );
     if (!rec) return null;
     if (rec.expiresAt && rec.expiresAt.getTime() < Date.now()) {
       throw new MetaTokenExpiredError(rec.expiresAt);
@@ -83,7 +113,10 @@ export class StoredTokenMetaAdapter implements MetaAdapter {
   }
 
   private async requireLease(op: string): Promise<MetaAccessTokenLease> {
-    const rec = await this.tokenStore.loadOAuthToken("meta");
+    const rec = await this.tokenStore.loadOAuthToken(
+      "meta",
+      await this.tokenRefFor(null)
+    );
     if (!rec) throw new MetaAdapterUnauthenticatedError(op);
     if (rec.expiresAt && rec.expiresAt.getTime() < Date.now()) {
       throw new MetaTokenExpiredError(rec.expiresAt);

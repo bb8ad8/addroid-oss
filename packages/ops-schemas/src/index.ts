@@ -148,6 +148,10 @@ export const BudgetGuardAccountBudgetSchema = z
     dailyBudget: z.number().nonnegative().default(0),
     monthlyBudget: z.number().nonnegative().default(0),
     currency: z.string().min(1).optional(),
+    // account 単位のしきい値上書き。指定したキーだけが共通 `alerts` を上書きし、
+    // 未指定のキーは共通値のまま使う。CV 単価も配信規模もアカウントごとに違うため、
+    // 「CV=0 でいくら消化したら鳴らすか」を 1 つの共通値で揃えるのは実用的でない。
+    alerts: BudgetGuardPolicyAlertsSchema.optional(),
   })
   .strict();
 
